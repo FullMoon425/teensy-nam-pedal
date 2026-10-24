@@ -52,7 +52,7 @@ sd-card/       microSD에 그대로 복사할 폴더 구조와 예시 프리셋
 | 3 | [`sketches/03_knobs_switches`](sketches/03_knobs_switches) | 포트 3개, 인코더, 풋스위치, LED 모두 인식 | H2 |
 | 4 | [`sketches/04_oled_display`](sketches/04_oled_display) | OLED 배선과 화면 표시 | H2 |
 | 5 | [`sketches/05_sd_card`](sketches/05_sd_card) | 내장 microSD 읽기/쓰기, `/models` 목록 | S3 준비 |
-| 6 | [`sketches/06_nam_benchmark`](sketches/06_nam_benchmark) | 48kHz 동작 + 모델별 CPU 사용률 측정, 지원 범위 결정 | S0 |
+| 6 | [`sketches/06_nam_benchmark`](sketches/06_nam_benchmark) (PlatformIO) | 48kHz 동작 + 모델별 CPU 사용률 측정, 지원 범위 결정 | S0 |
 | 7 | 브레드보드 아날로그 회로 | 전원부 → Vref → 입력/출력 버퍼, 기타 → 앰프 소리 깨끗 | H1 |
 | 8 | [`tools/`](tools) + [`firmware/test_pc`](firmware/test_pc) | `.namb` 변환, PC에서 기준 출력과 오차 1e-4 이하 | S1 |
 | 9 | [`firmware/`](firmware) | 보드에서 모델 재생 → 로딩·프리셋 → UI 순서로 기능 추가 | S2~S5 |
@@ -62,7 +62,7 @@ sd-card/       microSD에 그대로 복사할 폴더 구조와 예시 프리셋
 
 ## 업로드 방법
 
-### 방법 1: Arduino IDE + Teensyduino (테스트 스케치용)
+### 방법 1: Arduino IDE + Teensyduino (테스트 스케치 01~05용)
 
 1. [Arduino IDE 2](https://www.arduino.cc/en/software)를 설치합니다.
 2. **File > Preferences > Additional boards manager URLs**에 아래 주소를 넣습니다.
@@ -80,7 +80,7 @@ sd-card/       microSD에 그대로 복사할 폴더 구조와 예시 프리셋
 7. **Upload**를 누르면 Teensy Loader가 뜨고 자동으로 올라갑니다. 안 올라가면 Teensy 보드의 흰색 PROGRAM 버튼을 한 번 누르세요.
 8. **Tools > Serial Monitor**로 출력을 확인합니다.
 
-### 방법 2: PlatformIO (메인 펌웨어용)
+### 방법 2: PlatformIO (메인 펌웨어, 06 벤치마크용)
 
 1. VS Code에 **PlatformIO IDE** 확장을 설치합니다.
 2. VS Code에서 `firmware/` 폴더를 엽니다 (저장소 루트가 아니라 `firmware/`).
@@ -92,6 +92,11 @@ sd-card/       microSD에 그대로 복사할 폴더 구조와 예시 프리셋
    pio device monitor      # 시리얼 모니터
    ```
 4. 필요한 라이브러리는 `platformio.ini`의 `lib_deps`에 적혀 있어서 첫 빌드 때 자동으로 받습니다.
+5. **06 벤치마크**도 독립 PlatformIO 프로젝트(`sketches/06_nam_benchmark/platformio.ini`)입니다. VS Code에서 그 폴더를 열거나, 저장소 루트에서 `-d`로 폴더를 지정합니다.
+   ```bash
+   pio run -d sketches/06_nam_benchmark -t upload
+   pio device monitor -b 115200
+   ```
 
 ### 주의 사항
 
