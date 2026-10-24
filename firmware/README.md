@@ -1,6 +1,6 @@
 # firmware
 
-메인 NAM 펌웨어입니다. PlatformIO로 빌드합니다 (업로드 방법은 [루트 README](../README.md#방법-2-platformio-메인-펌웨어용)).
+메인 NAM 펌웨어입니다. PlatformIO로 빌드합니다 (업로드 방법은 [루트 README](../README.md#방법-2-platformio-메인-펌웨어-06-벤치마크용)).
 
 ```
 platformio.ini

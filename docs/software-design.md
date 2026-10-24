@@ -22,7 +22,7 @@
                    ├ int16 → float
                    ├ 노이즈게이트 → 입력 게인
                    ├ NAM 추론 (현재 모델 포인터)
-                   ├ (교체 중이면 이전/새 모델 크로스페이드)
+                   ├ (교체 중이면 페이드아웃 → 포인터 교체 → 페이드인)
                    ├ EQ 바이쿼드 3단 → 출력 레벨 → 바이패스 페이드
                    └ float → int16 (소프트 클리핑)
 
@@ -41,7 +41,21 @@
 
 ## 3. 오디오 설정 (확정 + 확인 필요)
 
-- 샘플레이트 **48kHz**: Teensy Audio Library 기본은 44.1kHz. `AUDIO_SAMPLE_RATE_EXACT` 재정의 + I2S 클럭(PLL4) 설정 변경 필요. 방법은 Phase S0에서 확정 **(확인 필요)**. 대안: 44.1kHz로 두고 약간의 톤 차이 감수.
+- 샘플레이트 **48kHz**: Teensy Audio Library 기본은 44.1kHz. 대안: 44.1kHz로 두고 약간의 톤 차이 감수.
+- 48kHz 설정 방법 (소스 확인함, 보드 검증은 S0):
+  1. **상수**: `AUDIO_SAMPLE_RATE_EXACT`는 Teensy 코어 `cores/teensy4/AudioStream.h`에 `#ifndef AUDIO_SAMPLE_RATE_EXACT` 가드로 정의되어 있어 컴파일 옵션 `-D`로 재정의할 수 있습니다.
+  2. **I2S 클럭(PLL4)**: Teensy 4.x에서는 코드 수정이 필요 없습니다. Audio 라이브러리 `output_i2s.cpp`의 `AudioOutputI2S::config_i2s()`가 `int fs = AUDIO_SAMPLE_RATE_EXACT;`로 PLL4 계수를 계산해 `set_audioClock()`을 부르고, `AudioInputI2S`도 같은 함수로 클럭을 잡습니다.
+  3. **PlatformIO**: `platformio.ini`의 `build_flags`에 `-DAUDIO_SAMPLE_RATE_EXACT=48000.0f`를 넣습니다. `build_flags`는 프로젝트 소스뿐 아니라 프레임워크(코어)와 라이브러리 빌드에도 적용되므로 모든 파일이 같은 값을 봅니다. `build_src_flags`는 `src/`에만 적용되어 라이브러리와 값이 어긋나므로 쓰지 않습니다. 따라서 **수정한 Audio 라이브러리를 `firmware/lib/`에 복사할 필요는 없습니다.**
+  4. **SGTL5000**: `AudioControlSGTL5000::enable()`이 `CHIP_CLK_CTRL`(0x0004)에 `0x0004`(SYS_FS = 44.1kHz, MCLK = 256×Fs)를 씁니다(`control_sgtl5000.cpp`). 48kHz는 SYS_FS = 0x2라 `0x0008`입니다. `write()`가 `protected`라 상속 클래스에서 `enable()` 직후 덮어씁니다.
+     ```cpp
+     class Codec48k : public AudioControlSGTL5000 {
+     public:
+       bool setSysFs48k() { return write(0x0004, 0x0008); }  // SYS_FS=48kHz, MCLK=256*Fs
+     };
+     ```
+     SYS_FS를 안 바꿨을 때 실제로 무엇이 틀어지는지는 **(확인 필요: SGTL5000 데이터시트의 CHIP_CLK_CTRL 설명. S0에서 확인)**. 같은 파일의 `autoVolumeControl()`도 44100이 하드코딩돼 있지만 이 프로젝트는 쓰지 않습니다.
+  5. **Arduino IDE**: 스케치 안의 `#define`은 라이브러리 `.cpp`에 적용되지 않습니다. 그래서 48kHz가 필요한 `06_nam_benchmark`는 PlatformIO로 빌드합니다. Arduino IDE에서 하려면 Teensyduino의 `platform.txt`/`boards.txt`에 전역 정의를 넣어야 하는데, 지원되는 방법은 **(확인 필요: S0에서 확인)**.
+  6. **검증**: 시리얼에 `AUDIO_SAMPLE_RATE_EXACT`를 출력하고, `AudioSynthWaveformSine`으로 1kHz를 내보내 주파수를 잽니다. 1000Hz면 정상, 약 1088Hz면 클럭만 48kHz이고 상수가 44.1kHz, 약 919Hz면 그 반대입니다.
 - 블록 크기 128샘플(`AUDIO_BLOCK_SAMPLES` 기본값). CPU가 빠듯하면 함수 호출 오버헤드 때문에 블록이 큰 게 유리하고, 지연은 늘어납니다.
 - 코덱: `sgtl5000.inputSelect(AUDIO_INPUT_LINEIN)`, `lineInLevel()`, `lineOutLevel()`로 레벨 맞춤.
 - CPU 클럭: 기본 600MHz. 필요 시 `set_arm_clock(816000000)` (방열 확인).
@@ -93,14 +107,19 @@ NamModel* createModel(const NambHeader& h, const float* weights, ModelSlot& slot
 | 4 | 2 | 포맷 버전 (1) |
 | 6 | 2 | 아키텍처 (1=LSTM, 2=A1 WaveNet, 3=A2-Lite) |
 | 8 | 4 | 샘플레이트 (48000) |
-| 12 | 4 | 설정 블록 길이 N |
-| 16 | N | 아키텍처 설정 (레이어 수, 채널, 커널, dilation 목록, head 설정 등, 고정 구조체) |
+| 12 | 4 | 설정 블록 길이 N (**4의 배수**) |
+| 16 | N | 아키텍처 설정 (레이어 수, 채널, 커널, dilation 목록, head 설정 등, 고정 구조체). 4의 배수가 되도록 끝을 0으로 채움 |
 | 16+N | 4 | 가중치 개수 W |
 | 20+N | 4W | float32 리틀엔디언 가중치 (공식 코어 로딩 순서 그대로) |
 | 20+N+4W | 가변 | 메타데이터(loudness, 이름 등) TLV |
 | 끝-4 | 4 | CRC32 |
 
-PC 쪽 `tools/nam2namb.py`가 만들고, 펌웨어는 헤더 검증(매직, 버전, 아키텍처 지원 여부, 크기 한도, CRC) 실패 시 거부합니다.
+PC 쪽 `tools/nam2namb.py`가 만들고, 펌웨어는 헤더 검증(매직, 버전, 아키텍처 지원 여부, 크기 한도, **N % 4 == 0**, CRC) 실패 시 거부합니다.
+
+**정렬 규칙**: 가중치 시작 오프셋 20+N이 4의 배수여야 파일 버퍼를 복사 없이 `const float*`로 캐스팅할 수 있습니다(20이 4의 배수이므로 N이 4의 배수면 됨).
+- Cortex-M7은 일반 정수 로드는 비정렬을 허용하지만 FPU 로드(`VLDR`)와 `LDRD`/`LDM`은 비정렬이면 UsageFault가 납니다. 컴파일러는 `float*`가 4바이트 정렬이라고 가정하고 이 명령을 씁니다.
+- 변환기는 설정 구조체 뒤를 0으로 채워 N을 4의 배수로 만들고, 펌웨어 파서는 N % 4 != 0이면 거부합니다.
+- 파일을 읽어 넣는 버퍼도 `alignas(4)` 이상(권장 `alignas(32)`, 캐시 라인)으로 선언합니다.
 
 ### 5-2. 프리셋 JSON (`/presets/NN_name.json`)
 ```json
@@ -142,10 +161,11 @@ PC 쪽 `tools/nam2namb.py`가 만들고, 펌웨어는 헤더 검증(매직, 버�
 ```
 IDLE → OPENING → READING(청크 4KB씩, loop() 1회당 1청크) → VALIDATING(CRC, 크기)
      → BUILDING(대기 슬롯에 모델 생성) → PREWARMING(무음 2048샘플 돌려 상태 안정화)
-     → READY → (오디오가 다음 블록 경계에서 교체, 15ms 크로스페이드) → IDLE
+     → READY → (오디오가 5ms 페이드아웃 → 블록 경계에서 포인터 교체 → 5ms 페이드인) → IDLE
 실패 시 어느 단계에서든 → ERROR(기존 모델 유지, 화면 표시) → IDLE
 ```
-- 크로스페이드 동안 두 모델이 동시에 돌아 CPU가 2배 → 크로스페이드 대신 **짧은 페이드아웃 → 교체 → 페이드인**(각 5ms)이 더 안전합니다. 벤치마크로 결정.
+- **교체 방식 (확정): 5ms 페이드아웃 → 교체 → 5ms 페이드인.** 교체 중 약 10ms 동안 소리가 작아지지만 모델은 항상 1개만 돕니다.
+- 크로스페이드(10~20ms)는 그동안 두 모델이 동시에 돌아 CPU가 2배가 됩니다. **S0 결과 모델 1개의 CPU 최대치가 35% 이하(2배여도 70% 기준 이내)일 때만** 선택지로 둡니다.
 - 프리셋만 바뀌고 모델이 같으면 로딩 생략, 파라미터만 교체.
 - **(선택) USB MTP**: `MTP_Teensy` 라이브러리로 PC에서 SD에 파일 복사. MTP 쓰기 중 SD 동시 접근 충돌 방지 위해 "USB 모드" 화면에서만 활성화하고, 종료 시 모델 목록 다시 스캔.
 
@@ -158,8 +178,18 @@ IDLE → OPENING → READING(청크 4KB씩, loop() 1회당 1청크) → VALIDATI
 - **캐치(soft takeover)**: 페이지·프리셋 바뀌면 각 포트를 "잠금" 상태로 두고, 물리 위치가 저장값을 지나는 순간 잠금 해제. 잠금 중에는 화면에 저장값과 노브 위치를 같이 표시.
 - 인코더: 핀 인터럽트로 쿼드러처 디코딩(Encoder 라이브러리), 디텐트당 1스텝. 버튼은 짧게/길게(600ms) 구분.
 - 풋스위치: 20ms 디바운스, 짧게(<600ms) = 바이패스 토글, 길게 = 다음 프리셋. 길게 판정은 600ms 도달 즉시 실행(발 떼기 기다리지 않음).
+- 풋스위치로 **이전 프리셋으로 가는 동작은 없습니다(의도).** 스위치가 1개라 동작을 늘리면 오조작이 생기므로, 이전 프리셋은 인코더 회전으로 고릅니다. 마지막 프리셋에서 길게 누르면 첫 프리셋으로 돌아갑니다.
 
-### 8-2. 화면·상태 머신
+### 8-2. 노브 페이지 (확정)
+| 페이지 | 포트 1 | 포트 2 | 포트 3 |
+|---|---|---|---|
+| AMP | Gain (`gain`) | Bass (`bass`) | Treble (`treble`) |
+| EQ | Bass (`bass`) | Mid (`mid`) | Treble (`treble`) |
+| OUT | Level (`level`) | Gate (`gate`) | Presence (`presence`) |
+
+- 괄호는 프리셋 JSON 필드입니다. AMP와 EQ의 Bass·Treble은 **같은 파라미터**이고, AMP는 자주 쓰는 노브를 모은 바로가기입니다. 페이지를 바꾸면 캐치가 걸리므로 같은 값을 두 페이지에서 만져도 값이 튀지 않습니다.
+
+### 8-3. 화면·상태 머신
 ```
 HOME(프리셋 보기)
   인코더 회전 → 프리셋 미리보기(이름만 바뀜) → 누름=로드 / 3초 무조작=취소
@@ -250,20 +280,29 @@ tools/
 
 [규칙]
 - 오디오 update() 안에서 SD 접근, 동적 할당, Serial, 화면 갱신 금지. 모든 버퍼는 정적 할당.
-- 오디오↔메인 데이터 교환은 블록 경계에서 원자적으로. 모델 교체는 포인터 교체 + 페이드.
+- 오디오↔메인 데이터 교환은 블록 경계에서 원자적으로. 모델 교체는 5ms 페이드아웃 → 포인터 교체 → 5ms 페이드인.
 - 핫루프는 FASTRUN, 성능 관련 주장은 반드시 측정 코드와 함께 준다.
 - 불확실한 라이브러리 동작이나 NAM 내부 구조는 추측하지 말고 "확인 필요"로 표시하고, 공식 소스의 어느 파일을 보면 되는지 알려준다.
 - 코드는 모듈 단위로 나눠 주고, 각 단계마다 PC 또는 보드에서 확인할 테스트를 같이 준다.
 - 답변은 한국어로.
 
 [지금까지 결정된 것]
+- 48kHz는 build_flags -DAUDIO_SAMPLE_RATE_EXACT=48000.0f + SGTL5000 CHIP_CLK_CTRL=0x0008(Codec48k). 보드 검증은 S0, 06은 독립 PlatformIO 프로젝트 (software-design.md 3장)
+- 모델 교체는 5ms 페이드아웃 → 포인터 교체 → 5ms 페이드인. 크로스페이드는 모델 1개 CPU 35% 이하일 때만 (software-design.md 7장)
+- 노브 페이지 AMP: Gain/Bass/Treble, EQ: Bass/Mid/Treble, OUT: Level/Gate/Presence. AMP와 EQ의 Bass·Treble은 같은 파라미터 (software-design.md 8-2절)
+- .namb 설정 블록 길이 N은 4의 배수, 파서는 N % 4 != 0이면 거부, 읽기 버퍼는 alignas(4) 이상 (software-design.md 5-1절)
+- 풋스위치 짧게 = 바이패스, 길게 600ms = 다음 프리셋(마지막 다음은 첫 프리셋). 이전 프리셋은 인코더로 (software-design.md 8-1절)
 - (단계가 끝날 때마다 여기에 추가: 벤치마크 결과, 지원 아키텍처, 핀 확정 등)
 ```
 
 ### S0 실현 가능성 벤치마크
 ```
 S0를 하자.
-1. Teensy Audio Library를 48kHz로 동작시키는 방법(AUDIO_SAMPLE_RATE_EXACT, I2S/PLL4 설정, SGTL5000 설정)과 검증 방법(사인파 생성 후 주파수 측정).
+1. software-design.md 3장에 정리한 48kHz 방법(build_flags -DAUDIO_SAMPLE_RATE_EXACT=48000.0f, Codec48k로 SYS_FS 덮어쓰기)을
+   sketches/06_nam_benchmark(독립 PlatformIO 프로젝트) 구조로 보드에서 검증하고, 1kHz 사인 주파수 측정값을
+   tools/benchmark_report.md의 "48kHz 설정 검증"에 기록. 3장의 (확인 필요) 두 개도 같이 확인:
+   - SYS_FS를 44.1kHz로 둔 채(setSysFs48k() 호출 생략) 48kHz 클럭을 넣었을 때 달라지는 점(주파수, 잡음, 왜곡). SGTL5000 데이터시트 CHIP_CLK_CTRL 설명 근거 포함
+   - Arduino IDE(Teensyduino)에서 AUDIO_SAMPLE_RATE_EXACT를 코어·라이브러리 전역으로 정의하는 방법이 있는지(platform.txt/boards.txt 근거)
 2. NAM 공식 코드 기준으로 A2-Lite, LSTM(hidden 16, 24), A1 WaveNet Nano, Feather의 레이어 구성과 샘플당 MAC 수, tanh 호출 수를 계산하고 근거 파일을 밝혀줘.
 3. 더미 가중치로 각 아키텍처 순전파를 돌리는 벤치마크 AudioStream 객체. 600MHz/816MHz, std::tanh/근사 tanh 조합별 AudioProcessorUsageMax를 시리얼로 출력.
 4. 결과 기록용 benchmark_report.md 양식과 "CPU 70% 이하" 기준의 지원 아키텍처 결정 방법.

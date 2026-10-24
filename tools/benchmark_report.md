@@ -13,8 +13,11 @@
 | | A1 Feather | | 816MHz | 근사 | 128 | | |
 
 ## 48kHz 설정 검증
-- 방법:
-- 측정 주파수 (1kHz 사인 출력):
+- 방법: `sketches/06_nam_benchmark` (PlatformIO, `-DAUDIO_SAMPLE_RATE_EXACT=48000.0f` + `Codec48k::setSysFs48k()`)
+- 시리얼 출력 `AUDIO_SAMPLE_RATE_EXACT`:
+- 측정 주파수 (1kHz 사인 출력, 1000Hz 정상 / 약 1088Hz·919Hz면 불일치):
+- SYS_FS를 44.1kHz로 둔 경우(`setSysFs48k()` 생략) 차이:
+- Arduino IDE 전역 정의 방법:
 
 ## 결론
 - 지원 아키텍처:
