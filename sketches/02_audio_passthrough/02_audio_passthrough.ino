@@ -13,7 +13,7 @@ AudioConnection      patchR(audioIn, 0, audioOut, 1);  // 모노 기타 입력�
 AudioControlSGTL5000 codec;
 
 // 코덱 레벨: 숫자가 작을수록 큰 입력을 허용합니다(Teensy Audio control_sgtl5000.cpp 주석 기준).
-// lineInLevel  0 = 3.12, 1 = 2.63, 2 = 2.22, 3 = 1.87, 4 = 1.58, 5 = 1.33(라이브러리 기본) ... 15 = 0.24Vpp
+// lineInLevel  0 = 3.12, 1 = 2.63, 2 = 2.22, 3 = 1.87, 4 = 1.58, 5 = 1.33(inputSelect(LINEIN)이 넣는 값) ... 15 = 0.24Vpp
 // lineOutLevel 13 = 3.16Vpp ... 29 = 1.29Vpp ... 31 = 1.16Vpp
 // 험버커 피크(최대 약 2Vpp 가정)에서도 클리핑이 없도록 0에서 시작하고, 측정 후 올립니다(README 참고).
 #define LINE_IN_LEVEL   0

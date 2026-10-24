@@ -53,8 +53,8 @@
        bool setSysFs48k() { return write(0x0004, 0x0008); }  // SYS_FS=48kHz, MCLK=256*Fs
      };
      ```
-     SYS_FS를 안 바꿨을 때 실제로 무엇이 틀어지는지는 **(확인 필요: SGTL5000 데이터시트의 CHIP_CLK_CTRL 설명)**. 같은 파일의 `autoVolumeControl()`도 44100이 하드코딩돼 있지만 이 프로젝트는 쓰지 않습니다.
-  5. **Arduino IDE**: 스케치 안의 `#define`은 라이브러리 `.cpp`에 적용되지 않습니다. 그래서 48kHz가 필요한 `06_nam_benchmark`는 PlatformIO로 빌드합니다. Arduino IDE에서 하려면 Teensyduino의 `platform.txt`/`boards.txt`에 전역 정의를 넣어야 하는데, 지원되는 방법은 **(확인 필요)**.
+     SYS_FS를 안 바꿨을 때 실제로 무엇이 틀어지는지는 **(확인 필요: SGTL5000 데이터시트의 CHIP_CLK_CTRL 설명. S0에서 확인)**. 같은 파일의 `autoVolumeControl()`도 44100이 하드코딩돼 있지만 이 프로젝트는 쓰지 않습니다.
+  5. **Arduino IDE**: 스케치 안의 `#define`은 라이브러리 `.cpp`에 적용되지 않습니다. 그래서 48kHz가 필요한 `06_nam_benchmark`는 PlatformIO로 빌드합니다. Arduino IDE에서 하려면 Teensyduino의 `platform.txt`/`boards.txt`에 전역 정의를 넣어야 하는데, 지원되는 방법은 **(확인 필요: S0에서 확인)**.
   6. **검증**: 시리얼에 `AUDIO_SAMPLE_RATE_EXACT`를 출력하고, `AudioSynthWaveformSine`으로 1kHz를 내보내 주파수를 잽니다. 1000Hz면 정상, 약 1088Hz면 클럭만 48kHz이고 상수가 44.1kHz, 약 919Hz면 그 반대입니다.
 - 블록 크기 128샘플(`AUDIO_BLOCK_SAMPLES` 기본값). CPU가 빠듯하면 함수 호출 오버헤드 때문에 블록이 큰 게 유리하고, 지연은 늘어납니다.
 - 코덱: `sgtl5000.inputSelect(AUDIO_INPUT_LINEIN)`, `lineInLevel()`, `lineOutLevel()`로 레벨 맞춤.

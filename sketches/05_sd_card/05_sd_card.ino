@@ -75,6 +75,15 @@ void setup() {
   listDir("/presets");
   listDir("/system");
 
+  // 4KB 청크 읽기 속도 (ModelLoader가 loop() 1회에 4KB씩 읽는 구조라 1청크 시간이 중요)
+  // 1) 기존 파일: 이 스케치가 아무것도 쓰기 전에 먼저 잼 (방금 쓴 데이터의 영향을 덜 받음)
+  char modelPath[64];
+  if (findLargestModel(modelPath, sizeof(modelPath))) {
+    measureRead(modelPath, "기존 파일");
+  } else {
+    Serial.println("/models에 파일이 없어 기존 파일 측정은 건너뜀 (아무 파일이나 넣어 두면 측정)");
+  }
+
   // 쓰기/읽기 테스트
   const char* testPath = "/system/sd_test.txt";
   SD.remove(testPath);
@@ -86,16 +95,7 @@ void setup() {
   while (r.available()) Serial.write(r.read());
   r.close();
 
-  // 4KB 청크 읽기 속도 (ModelLoader가 loop() 1회에 4KB씩 읽는 구조라 1청크 시간이 중요)
-  // 1) 기존 파일: 쓰기 전에 먼저 재야 방금 쓴 데이터의 영향을 덜 받음
-  char modelPath[64];
-  if (findLargestModel(modelPath, sizeof(modelPath))) {
-    measureRead(modelPath, "기존 파일");
-  } else {
-    Serial.println("/models에 파일이 없어 기존 파일 측정은 건너뜀 (아무 파일이나 넣어 두면 측정)");
-  }
-
-  // 2) 방금 쓴 파일 256KB (낙관적인 값)
+  // 4KB 청크 읽기 속도 2) 방금 쓴 파일 256KB (낙관적인 값)
   File big = SD.open("/system/speed_test.bin", FILE_WRITE);
   for (int i = 0; i < 64; i++) big.write(buf, sizeof(buf));
   big.close();
