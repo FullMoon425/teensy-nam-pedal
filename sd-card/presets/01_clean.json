@@ -1,0 +1,6 @@
+{
+  "name": "Clean",
+  "model": "clean_a2lite.namb",
+  "gain": 0.40, "bass": 0.50, "mid": 0.50, "treble": 0.55,
+  "presence": 0.50, "level": 0.70, "gate": 0.20
+}
