@@ -180,7 +180,7 @@ PCB 주문은 배송 1~2주라, 일정이 촉박하면 **만능기판 + 기성 �
 [프로젝트]
 - MCU: Teensy 4.1 (3.3V 로직, 5V 톨러런트 아님), 코덱: PJRC Audio Shield Rev D (SGTL5000), LINE IN/LINE OUT만 사용.
 - 전원: 9V DC 2.1mm 센터 마이너스, 역극성 보호 → L7805 → Teensy VIN (VUSB-VIN 패드 절단). 오피앰프는 9V 단전원, Vref 4.5V.
-- 오디오: IN(1/4" TS) → 1MΩ 입력 버퍼 → LINE IN L. LINE OUT L → 출력 버퍼 → SEND. RETURN(스위칭 잭, 미삽입 시 SEND 신호 통과) → 출력 버퍼 → OUT. FX 루프는 아날로그.
+- 오디오: IN(1/4" TS) → 입력 버퍼(입력 임피던스 약 0.91MΩ) → LINE IN L. LINE OUT L → 출력 버퍼 → SEND. RETURN(스위칭 잭, 미삽입 시 SEND 신호 통과) → 출력 버퍼 → OUT. FX 루프는 아날로그.
 - 조작계: B10K 포트 3개(ADC, 3.3V 기준), EC11 인코더(푸시), 모멘터리 풋스위치, 상태 LED, 1.3" OLED 128x64 SPI.
 - 바이패스: MVP는 디지털, 확장으로 릴레이 트루 바이패스.
 - 케이스: Hammond 1590XX. 마감은 만능기판 + 기성 모듈 우선.
@@ -193,6 +193,9 @@ PCB 주문은 배송 1~2주라, 일정이 촉박하면 **만능기판 + 기성 �
 - 답변은 한국어로.
 
 [지금까지 결정된 것]
+- 입력 풀다운 10MΩ + Vref 바이어스 1MΩ → 입력 임피던스 약 0.91MΩ (hardware-design.md 3-1절)
+- lineInLevel은 0(3.12Vpp)에서 시작하고 02 패스스루에서 실제 기타로 측정해 확정 (hardware-design.md 3-1절)
+- 13번 핀은 보드 LED와 OLED SPI SCK 공용. 바이패스 LED는 9번 (firmware/src/pins.h)
 - (단계가 끝날 때마다 여기에 추가)
 ```
 
@@ -205,7 +208,7 @@ PCB 주문은 배송 1~2주라, 일정이 촉박하면 **만능기판 + 기성 �
 ```
 입력 버퍼와 출력 버퍼 2개를 설계해줘.
 1. 먼저 Audio Shield Rev D 회로도 기준으로 LINE IN/LINE OUT의 결합 캐패시터 유무, 입력 임피던스, 레벨 범위(lineInLevel, lineOutLevel)를 정리해줘.
-2. 입력: 1MΩ, 팝 방지, RF 필터, 하이게인 험버커에서도 클리핑 없는 게인 설정.
+2. 입력: 임피던스 약 1MΩ(현재 풀다운 10MΩ ∥ 바이어스 1MΩ ≈ 0.91MΩ), 팝 방지, RF 필터, 하이게인 험버커에서도 클리핑 없는 게인 설정.
 3. 출력: SEND와 OUT 각각, 직렬 1kΩ, 풀다운, RETURN 스위칭 잭 노멀 배선.
 4. 각 단의 헤드룸(9V 단전원 TL072 기준 출력 스윙)과 예상 잡음 레벨.
 ```

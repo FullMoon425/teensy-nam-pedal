@@ -280,20 +280,29 @@ tools/
 
 [규칙]
 - 오디오 update() 안에서 SD 접근, 동적 할당, Serial, 화면 갱신 금지. 모든 버퍼는 정적 할당.
-- 오디오↔메인 데이터 교환은 블록 경계에서 원자적으로. 모델 교체는 포인터 교체 + 페이드.
+- 오디오↔메인 데이터 교환은 블록 경계에서 원자적으로. 모델 교체는 5ms 페이드아웃 → 포인터 교체 → 5ms 페이드인.
 - 핫루프는 FASTRUN, 성능 관련 주장은 반드시 측정 코드와 함께 준다.
 - 불확실한 라이브러리 동작이나 NAM 내부 구조는 추측하지 말고 "확인 필요"로 표시하고, 공식 소스의 어느 파일을 보면 되는지 알려준다.
 - 코드는 모듈 단위로 나눠 주고, 각 단계마다 PC 또는 보드에서 확인할 테스트를 같이 준다.
 - 답변은 한국어로.
 
 [지금까지 결정된 것]
+- 48kHz는 build_flags -DAUDIO_SAMPLE_RATE_EXACT=48000.0f + SGTL5000 CHIP_CLK_CTRL=0x0008(Codec48k). 보드 검증은 S0, 06은 독립 PlatformIO 프로젝트 (software-design.md 3장)
+- 모델 교체는 5ms 페이드아웃 → 포인터 교체 → 5ms 페이드인. 크로스페이드는 모델 1개 CPU 35% 이하일 때만 (software-design.md 7장)
+- 노브 페이지 AMP: Gain/Bass/Treble, EQ: Bass/Mid/Treble, OUT: Level/Gate/Presence. AMP와 EQ의 Bass·Treble은 같은 파라미터 (software-design.md 8-2절)
+- .namb 설정 블록 길이 N은 4의 배수, 파서는 N % 4 != 0이면 거부, 읽기 버퍼는 alignas(4) 이상 (software-design.md 5-1절)
+- 풋스위치 짧게 = 바이패스, 길게 600ms = 다음 프리셋(마지막 다음은 첫 프리셋). 이전 프리셋은 인코더로 (software-design.md 8-1절)
 - (단계가 끝날 때마다 여기에 추가: 벤치마크 결과, 지원 아키텍처, 핀 확정 등)
 ```
 
 ### S0 실현 가능성 벤치마크
 ```
 S0를 하자.
-1. Teensy Audio Library를 48kHz로 동작시키는 방법(AUDIO_SAMPLE_RATE_EXACT, I2S/PLL4 설정, SGTL5000 설정)과 검증 방법(사인파 생성 후 주파수 측정).
+1. software-design.md 3장에 정리한 48kHz 방법(build_flags -DAUDIO_SAMPLE_RATE_EXACT=48000.0f, Codec48k로 SYS_FS 덮어쓰기)을
+   sketches/06_nam_benchmark(독립 PlatformIO 프로젝트) 구조로 보드에서 검증하고, 1kHz 사인 주파수 측정값을
+   tools/benchmark_report.md의 "48kHz 설정 검증"에 기록. 3장의 (확인 필요) 두 개도 같이 확인:
+   - SYS_FS를 44.1kHz로 둔 채(setSysFs48k() 호출 생략) 48kHz 클럭을 넣었을 때 달라지는 점(주파수, 잡음, 왜곡). SGTL5000 데이터시트 CHIP_CLK_CTRL 설명 근거 포함
+   - Arduino IDE(Teensyduino)에서 AUDIO_SAMPLE_RATE_EXACT를 코어·라이브러리 전역으로 정의하는 방법이 있는지(platform.txt/boards.txt 근거)
 2. NAM 공식 코드 기준으로 A2-Lite, LSTM(hidden 16, 24), A1 WaveNet Nano, Feather의 레이어 구성과 샘플당 MAC 수, tanh 호출 수를 계산하고 근거 파일을 밝혀줘.
 3. 더미 가중치로 각 아키텍처 순전파를 돌리는 벤치마크 AudioStream 객체. 600MHz/816MHz, std::tanh/근사 tanh 조합별 AudioProcessorUsageMax를 시리얼로 출력.
 4. 결과 기록용 benchmark_report.md 양식과 "CPU 70% 이하" 기준의 지원 아키텍처 결정 방법.
