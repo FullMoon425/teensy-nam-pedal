@@ -1,0 +1,49 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Arduino / Teensyduino 빌드 결과
+build/
+*.hex
+*.elf
+*.bin
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.code-workspace
+
+# PC 테스트 빌드 (CMake)
+firmware/test_pc/build/
+CMakeFiles/
+CMakeCache.txt
+cmake-build-*/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# NAM 모델과 오디오 파일 (용량, 저작권 문제로 기본 제외)
+*.nam
+*.namb
+*.wav
+tools/out/
+!sd-card/models/.gitkeep
+
+# KiCad 임시 파일
+*-backups/
+*.kicad_prl
+fp-info-cache
+_autosave-*
+*.bak
+*.lck
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
