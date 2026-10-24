@@ -57,7 +57,9 @@ NAM 모델은 아키텍처별로 연산량이 크게 다릅니다. 아래 수치
 ### 노브 페이지 (인코더 누름으로 전환)
 - **AMP 페이지**: Input Gain / Bass / Treble
 - **EQ 페이지**: Bass / Mid / Treble
-- **OUT 페이지**: Output Level / Noise Gate Threshold / (Mid 또는 Presence)
+- **OUT 페이지**: Output Level / Noise Gate Threshold / Presence
+
+AMP 페이지의 Bass·Treble은 EQ 페이지의 Bass·Treble과 **같은 파라미터**(프리셋의 `bass`, `treble` 하나씩)입니다. AMP 페이지는 자주 만지는 노브를 모은 바로가기이고, 한쪽에서 바꾸면 다른 페이지에도 같은 값이 보입니다. 파라미터는 프리셋 JSON의 7개(`gain`, `bass`, `mid`, `treble`, `presence`, `level`, `gate`)가 전부입니다.
 
 포텐셔미터는 절대 위치라서 페이지·프리셋 전환 시 값이 튀는 문제가 있습니다. **"캐치(soft takeover)" 방식**으로 정했습니다: 노브가 저장된 값을 지나칠 때까지는 값이 바뀌지 않고, 화면에 현재 노브 위치와 저장값을 같이 표시합니다.
 
@@ -156,7 +158,7 @@ tools/
 | 7 | Phase 6 다듬기 | 노이즈 잡기, 노브 커브 조정, 노이즈게이트 튜닝, 실사용 테스트 |
 | 8 | 여유/확장 | USB MTP, 릴레이 트루바이패스, 캐비닛 IR, Feather 최적화 |
 
-시간이 모자라면 자르는 순서: 캐비닛 IR → 릴레이 바이패스 → USB MTP → EQ 페이지(Bass/Treble만 남김).
+시간이 모자라면 자르는 순서: 캐비닛 IR → 릴레이 바이패스 → USB MTP → EQ 페이지(빼면 Mid는 0.5 고정, Bass/Treble은 AMP 페이지에 남음).
 PCB 주문(JLCPCB 등)은 배송 1~2주가 걸리므로, 시간이 촉박하면 **만능기판 + 기성 모듈**로 마감하는 쪽을 권장합니다.
 
 ---

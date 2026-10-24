@@ -41,5 +41,5 @@ void loop() {
   if (frame % 20 == 0) {
     Serial.printf("1프레임 전송 시간: %lu us\n", micros() - t0);
   }
-  delay(50);  // 최대 20fps (software-design.md 8-2절)
+  delay(50);  // 최대 20fps (software-design.md 8-3절)
 }
