@@ -29,7 +29,7 @@ NAM 모델은 아키텍처별로 연산량이 크게 다릅니다. 아래 수치
 - A2 모델 파일 하나에 Full(8채널)과 Lite(3채널)가 같이 들어 있고, TONE3000에서 새로 학습하면 A2만 나옵니다. 그래서 새 모델은 재학습 없이 Lite 부분만 꺼내 쓰면 됩니다.
 - A1 Standard와 A2-Full은 지원하지 않습니다. 예전 A1 Standard 모델을 쓰고 싶으면 A2로 재학습하세요.
 - 메모리는 문제 없음: Nano/Feather 가중치는 수천~수만 개 float(수십 KB 수준). 모델 2개(현재 + 로딩 중)를 RAM에 동시에 들고 있어도 충분합니다.
-- **샘플레이트**: NAM 모델은 48kHz로 학습됩니다. Teensy Audio Library 기본값은 44.1kHz이므로 **48kHz로 바꿔서 돌려야** 톤이 정확합니다(라이브러리의 `AUDIO_SAMPLE_RATE_EXACT` 수정 + I2S 클럭 설정). 이것도 Phase 0에서 같이 검증합니다.
+- **샘플레이트**: NAM 모델은 48kHz로 학습됩니다. Teensy Audio Library 기본값은 44.1kHz이므로 **48kHz로 바꿔서 돌려야** 톤이 정확합니다(`AUDIO_SAMPLE_RATE_EXACT`를 빌드 옵션으로 재정의하면 Teensy 4.x는 I2S 클럭이 자동 계산됨 + SGTL5000 클럭 레지스터 설정, 자세한 방법은 software-design.md 3장). 이것도 Phase 0에서 같이 검증합니다.
 - **추론 엔진**: 공식 NeuralAmpModelerCore는 Eigen, nlohmann/json, std::filesystem을 써서 Teensy에 그대로 올리기 무겁습니다. **WaveNet/LSTM 순전파만 직접 짠 경량 C++ 엔진**(CMSIS-DSP 활용)을 만들고, PC에서 공식 코어로 뽑은 기준 출력과 비교해 정확성을 검증하는 방식을 권장합니다.
 - 참고: 같은 프로젝트의 Daisy Seed(480MHz M7)도 연산 체급은 비슷해서, Teensy에서 안 되는 모델은 Daisy에서도 대체로 안 됩니다. 반대로 Teensy에서 검증된 엔진 코드는 Daisy로 거의 그대로 옮길 수 있습니다.
 

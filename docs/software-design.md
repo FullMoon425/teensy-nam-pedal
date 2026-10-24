@@ -41,7 +41,21 @@
 
 ## 3. 오디오 설정 (확정 + 확인 필요)
 
-- 샘플레이트 **48kHz**: Teensy Audio Library 기본은 44.1kHz. `AUDIO_SAMPLE_RATE_EXACT` 재정의 + I2S 클럭(PLL4) 설정 변경 필요. 방법은 Phase S0에서 확정 **(확인 필요)**. 대안: 44.1kHz로 두고 약간의 톤 차이 감수.
+- 샘플레이트 **48kHz**: Teensy Audio Library 기본은 44.1kHz. 대안: 44.1kHz로 두고 약간의 톤 차이 감수.
+- 48kHz 설정 방법 (소스 확인함, 보드 검증은 S0):
+  1. **상수**: `AUDIO_SAMPLE_RATE_EXACT`는 Teensy 코어 `cores/teensy4/AudioStream.h`에 `#ifndef AUDIO_SAMPLE_RATE_EXACT` 가드로 정의되어 있어 컴파일 옵션 `-D`로 재정의할 수 있습니다.
+  2. **I2S 클럭(PLL4)**: Teensy 4.x에서는 코드 수정이 필요 없습니다. Audio 라이브러리 `output_i2s.cpp`의 `AudioOutputI2S::config_i2s()`가 `int fs = AUDIO_SAMPLE_RATE_EXACT;`로 PLL4 계수를 계산해 `set_audioClock()`을 부르고, `AudioInputI2S`도 같은 함수로 클럭을 잡습니다.
+  3. **PlatformIO**: `platformio.ini`의 `build_flags`에 `-DAUDIO_SAMPLE_RATE_EXACT=48000.0f`를 넣습니다. `build_flags`는 프로젝트 소스뿐 아니라 프레임워크(코어)와 라이브러리 빌드에도 적용되므로 모든 파일이 같은 값을 봅니다. `build_src_flags`는 `src/`에만 적용되어 라이브러리와 값이 어긋나므로 쓰지 않습니다. 따라서 **수정한 Audio 라이브러리를 `firmware/lib/`에 복사할 필요는 없습니다.**
+  4. **SGTL5000**: `AudioControlSGTL5000::enable()`이 `CHIP_CLK_CTRL`(0x0004)에 `0x0004`(SYS_FS = 44.1kHz, MCLK = 256×Fs)를 씁니다(`control_sgtl5000.cpp`). 48kHz는 SYS_FS = 0x2라 `0x0008`입니다. `write()`가 `protected`라 상속 클래스에서 `enable()` 직후 덮어씁니다.
+     ```cpp
+     class Codec48k : public AudioControlSGTL5000 {
+     public:
+       bool setSysFs48k() { return write(0x0004, 0x0008); }  // SYS_FS=48kHz, MCLK=256*Fs
+     };
+     ```
+     SYS_FS를 안 바꿨을 때 실제로 무엇이 틀어지는지는 **(확인 필요: SGTL5000 데이터시트의 CHIP_CLK_CTRL 설명)**. 같은 파일의 `autoVolumeControl()`도 44100이 하드코딩돼 있지만 이 프로젝트는 쓰지 않습니다.
+  5. **Arduino IDE**: 스케치 안의 `#define`은 라이브러리 `.cpp`에 적용되지 않습니다. 그래서 48kHz가 필요한 `06_nam_benchmark`는 PlatformIO로 빌드합니다. Arduino IDE에서 하려면 Teensyduino의 `platform.txt`/`boards.txt`에 전역 정의를 넣어야 하는데, 지원되는 방법은 **(확인 필요)**.
+  6. **검증**: 시리얼에 `AUDIO_SAMPLE_RATE_EXACT`를 출력하고, `AudioSynthWaveformSine`으로 1kHz를 내보내 주파수를 잽니다. 1000Hz면 정상, 약 1088Hz면 클럭만 48kHz이고 상수가 44.1kHz, 약 919Hz면 그 반대입니다.
 - 블록 크기 128샘플(`AUDIO_BLOCK_SAMPLES` 기본값). CPU가 빠듯하면 함수 호출 오버헤드 때문에 블록이 큰 게 유리하고, 지연은 늘어납니다.
 - 코덱: `sgtl5000.inputSelect(AUDIO_INPUT_LINEIN)`, `lineInLevel()`, `lineOutLevel()`로 레벨 맞춤.
 - CPU 클럭: 기본 600MHz. 필요 시 `set_arm_clock(816000000)` (방열 확인).
