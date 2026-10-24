@@ -1,7 +1,7 @@
 // 01_blink: Teensy 4.1 업로드 환경 확인
 // 보드 LED(13번 핀)가 0.5초 간격으로 깜빡이고, 시리얼 모니터에 카운트가 찍히면 통과.
 
-#define PIN_LED LED_BUILTIN  // Teensy 4.1 = 13번 핀
+#define PIN_LED LED_BUILTIN  // Teensy 4.1 = 13번 핀 (나중에 OLED SPI SCK로도 쓰므로, OLED 연결 후에는 화면 갱신 때 깜빡임)
 
 unsigned long count = 0;
 

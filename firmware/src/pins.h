@@ -20,6 +20,7 @@ constexpr int PIN_FOOTSW = 5;
 constexpr int PIN_LED = 9;
 
 // OLED SPI (MOSI 11, SCK 13은 하드웨어 SPI 고정)
+// 13번은 보드 LED(LED_BUILTIN)와 같은 핀이라 SPI 전송 중 보드 LED가 깜빡임. 정상 동작이며 13번을 LED 용도로 쓰지 말 것.
 constexpr int PIN_OLED_CS  = 10;
 constexpr int PIN_OLED_DC  = 24;
 constexpr int PIN_OLED_RST = 25;
