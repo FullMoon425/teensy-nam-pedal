@@ -63,12 +63,13 @@ AMP 페이지의 Bass·Treble은 EQ 페이지의 Bass·Treble과 **같은 파라
 
 포텐셔미터는 절대 위치라서 페이지·프리셋 전환 시 값이 튀는 문제가 있습니다. **"캐치(soft takeover)" 방식**으로 정했습니다: 노브가 저장된 값을 지나칠 때까지는 값이 바뀌지 않고, 화면에 현재 노브 위치와 저장값을 같이 표시합니다.
 
-### 화면 구성 예시
+### 화면 구성 예시 (software-design.md 8-3절과 같음)
 ```
-[03] Plexi Crunch        BYP
-model: plexi_nano.namb
-AMP  Gain 6.2 Bass 5.0 Treb 7.1
-CPU 61%                 48k
+[03] Plexi Crunch       BYP
+plexi_nano.namb
+AMP  Gain  Bass  Treb
+     6.2   5.0   7.1
+CPU 61%                48k
 ```
 
 ---

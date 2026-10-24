@@ -1,5 +1,6 @@
 // 04_oled_display: 1.3" OLED 128x64 SPI 표시 확인 (U8g2)
-// 화면에 HOME 화면 예시와 프레임 카운터가 나오면 통과. 시리얼에 1프레임 전송 시간이 찍힙니다.
+// 화면에 HOME 화면 예시(software-design.md 8-3절과 같은 5줄)와 프레임 카운터가 나오면 통과.
+// 프레임 카운터는 마지막 줄 가운데(CPU와 48k 사이)에 표시합니다. 시리얼에 1프레임 전송 시간이 찍힙니다.
 //
 // 라이브러리: Arduino IDE Library Manager에서 "U8g2" 설치.
 // SSD1306 모듈이면 아래 생성자를 U8G2_SSD1306_128X64_NONAME_F_4W_HW_SPI 로 바꾸세요.
@@ -32,9 +33,10 @@ void loop() {
   oled.drawStr(0, 22, "plexi_nano.namb");
   oled.drawStr(0, 36, "AMP  Gain  Bass  Treb");
   oled.drawStr(0, 48, "     6.2   5.0   7.1");
-  char buf[24];
-  snprintf(buf, sizeof(buf), "frame %lu", frame++);
-  oled.drawStr(0, 62, buf);
+  oled.drawStr(0, 62, "CPU 61%");
+  char buf[16];
+  snprintf(buf, sizeof(buf), "f%lu", frame++);
+  oled.drawStr(54, 62, buf);  // 테스트용 프레임 카운터 (실제 HOME 화면에는 없음)
   oled.drawStr(104, 62, "48k");
   oled.sendBuffer();
 
