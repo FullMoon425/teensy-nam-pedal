@@ -20,7 +20,7 @@ void setup() {
 
   codec.enable();
   codec.inputSelect(AUDIO_INPUT_LINEIN);
-  codec.lineInLevel(5);
+  codec.lineInLevel(0);   // 3.12Vpp. 02 패스스루 측정값으로 확정 후 변경 (hardware-design.md 3-1절)
   codec.lineOutLevel(29);
 
   pinMode(PIN_LED, OUTPUT);
