@@ -6,6 +6,7 @@
 // 그래서 /models에 미리 복사해 둔 파일이 있으면 그 파일(가장 큰 것)도 같은 방법으로 잽니다.
 // 가장 현실적인 값은 전원을 껐다 켠 직후 첫 실행의 /models 결과입니다.
 
+#include <Arduino.h>
 #include <SD.h>
 
 static uint8_t buf[4096];

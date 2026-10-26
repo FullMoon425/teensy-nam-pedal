@@ -2,9 +2,10 @@
 // 화면에 HOME 화면 예시(software-design.md 8-3절과 같은 5줄)와 프레임 카운터가 나오면 통과.
 // 프레임 카운터는 마지막 줄 가운데(CPU와 48k 사이)에 표시합니다. 시리얼에 1프레임 전송 시간이 찍힙니다.
 //
-// 라이브러리: Arduino IDE Library Manager에서 "U8g2" 설치.
+// 라이브러리: U8g2는 platformio.ini의 lib_deps로 첫 빌드 때 자동으로 받습니다.
 // SSD1306 모듈이면 아래 생성자를 U8G2_SSD1306_128X64_NONAME_F_4W_HW_SPI 로 바꾸세요.
 
+#include <Arduino.h>
 #include <U8g2lib.h>
 #include <SPI.h>
 

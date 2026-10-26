@@ -54,7 +54,7 @@
      };
      ```
      SYS_FS를 안 바꿨을 때 실제로 무엇이 틀어지는지는 **(확인 필요: SGTL5000 데이터시트의 CHIP_CLK_CTRL 설명. S0에서 확인)**. 같은 파일의 `autoVolumeControl()`도 44100이 하드코딩돼 있지만 이 프로젝트는 쓰지 않습니다.
-  5. **Arduino IDE**: 스케치 안의 `#define`은 라이브러리 `.cpp`에 적용되지 않습니다. 그래서 48kHz가 필요한 `06_nam_benchmark`는 PlatformIO로 빌드합니다. Arduino IDE에서 하려면 Teensyduino의 `platform.txt`/`boards.txt`에 전역 정의를 넣어야 하는데, 지원되는 방법은 **(확인 필요: S0에서 확인)**.
+  5. **소스 안의 `#define`은 쓰지 않음**: 스케치나 `main.cpp` 안의 `#define`은 라이브러리 `.cpp`에 적용되지 않습니다. 이 프로젝트는 테스트 스케치까지 모두 PlatformIO로 빌드하므로 Arduino IDE(Teensyduino) 설정은 다루지 않습니다.
   6. **검증**: 시리얼에 `AUDIO_SAMPLE_RATE_EXACT`를 출력하고, `AudioSynthWaveformSine`으로 1kHz를 내보내 주파수를 잽니다. 1000Hz면 정상, 약 1088Hz면 클럭만 48kHz이고 상수가 44.1kHz, 약 919Hz면 그 반대입니다.
 - 블록 크기 128샘플(`AUDIO_BLOCK_SAMPLES` 기본값). CPU가 빠듯하면 함수 호출 오버헤드 때문에 블록이 큰 게 유리하고, 지연은 늘어납니다.
 - 코덱: `sgtl5000.inputSelect(AUDIO_INPUT_LINEIN)`, `lineInLevel()`, `lineOutLevel()`로 레벨 맞춤.
@@ -300,9 +300,8 @@ tools/
 S0를 하자.
 1. software-design.md 3장에 정리한 48kHz 방법(build_flags -DAUDIO_SAMPLE_RATE_EXACT=48000.0f, Codec48k로 SYS_FS 덮어쓰기)을
    sketches/06_nam_benchmark(독립 PlatformIO 프로젝트) 구조로 보드에서 검증하고, 1kHz 사인 주파수 측정값을
-   tools/benchmark_report.md의 "48kHz 설정 검증"에 기록. 3장의 (확인 필요) 두 개도 같이 확인:
+   tools/benchmark_report.md의 "48kHz 설정 검증"에 기록. 3장의 (확인 필요)도 같이 확인:
    - SYS_FS를 44.1kHz로 둔 채(setSysFs48k() 호출 생략) 48kHz 클럭을 넣었을 때 달라지는 점(주파수, 잡음, 왜곡). SGTL5000 데이터시트 CHIP_CLK_CTRL 설명 근거 포함
-   - Arduino IDE(Teensyduino)에서 AUDIO_SAMPLE_RATE_EXACT를 코어·라이브러리 전역으로 정의하는 방법이 있는지(platform.txt/boards.txt 근거)
 2. NAM 공식 코드 기준으로 A2-Lite, LSTM(hidden 16, 24), A1 WaveNet Nano, Feather의 레이어 구성과 샘플당 MAC 수, tanh 호출 수를 계산하고 근거 파일을 밝혀줘.
 3. 더미 가중치로 각 아키텍처 순전파를 돌리는 벤치마크 AudioStream 객체. 600MHz/816MHz, std::tanh/근사 tanh 조합별 AudioProcessorUsageMax를 시리얼로 출력.
 4. 결과 기록용 benchmark_report.md 양식과 "CPU 70% 이하" 기준의 지원 아키텍처 결정 방법.

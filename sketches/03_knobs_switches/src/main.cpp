@@ -2,6 +2,7 @@
 // 노브를 돌리면 0~100% 값이, 인코더를 돌리면 카운트가, 스위치를 누르면 짧게/길게 이벤트가 시리얼에 찍히면 통과.
 // 풋스위치를 짧게 누를 때마다 LED가 토글됩니다(바이패스 표시 흉내).
 
+#include <Arduino.h>
 #include <Encoder.h>
 
 // 핀 배치 (docs/hardware-design.md 5장 초안, firmware/src/pins.h와 동일하게 유지)
