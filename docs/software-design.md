@@ -23,7 +23,7 @@
                    ├ 노이즈게이트 → 입력 게인
                    ├ NAM 추론 (현재 모델 포인터)
                    ├ (교체 중이면 페이드아웃 → 포인터 교체 → 페이드인)
-                   ├ EQ 바이쿼드 3단 → 출력 레벨 → 바이패스 페이드
+                   ├ EQ 바이쿼드 3단 → 마스터 → 바이패스 페이드
                    └ float → int16 (소프트 클리핑)
 
 [loop(), 메인 컨텍스트]
@@ -54,7 +54,7 @@
      };
      ```
      SYS_FS를 안 바꿨을 때 실제로 무엇이 틀어지는지는 **(확인 필요: SGTL5000 데이터시트의 CHIP_CLK_CTRL 설명. S0에서 확인)**. 같은 파일의 `autoVolumeControl()`도 44100이 하드코딩돼 있지만 이 프로젝트는 쓰지 않습니다.
-  5. **Arduino IDE**: 스케치 안의 `#define`은 라이브러리 `.cpp`에 적용되지 않습니다. 그래서 48kHz가 필요한 `06_nam_benchmark`는 PlatformIO로 빌드합니다. Arduino IDE에서 하려면 Teensyduino의 `platform.txt`/`boards.txt`에 전역 정의를 넣어야 하는데, 지원되는 방법은 **(확인 필요: S0에서 확인)**.
+  5. **소스 안의 `#define`은 쓰지 않음**: 스케치나 `main.cpp` 안의 `#define`은 라이브러리 `.cpp`에 적용되지 않습니다. 이 프로젝트는 테스트 스케치까지 모두 PlatformIO로 빌드하므로 Arduino IDE(Teensyduino) 설정은 다루지 않습니다.
   6. **검증**: 시리얼에 `AUDIO_SAMPLE_RATE_EXACT`를 출력하고, `AudioSynthWaveformSine`으로 1kHz를 내보내 주파수를 잽니다. 1000Hz면 정상, 약 1088Hz면 클럭만 48kHz이고 상수가 44.1kHz, 약 919Hz면 그 반대입니다.
 - 블록 크기 128샘플(`AUDIO_BLOCK_SAMPLES` 기본값). CPU가 빠듯하면 함수 호출 오버헤드 때문에 블록이 큰 게 유리하고, 지연은 늘어납니다.
 - 코덱: `sgtl5000.inputSelect(AUDIO_INPUT_LINEIN)`, `lineInLevel()`, `lineOutLevel()`로 레벨 맞춤.
@@ -126,8 +126,8 @@ PC 쪽 `tools/nam2namb.py`가 만들고, 펌웨어는 헤더 검증(매직, 버�
 {
   "name": "Plexi Crunch",
   "model": "plexi_nano.namb",
-  "gain": 0.62, "bass": 0.50, "mid": 0.50, "treble": 0.71,
-  "presence": 0.50, "level": 0.70, "gate": 0.30
+  "gain": 0.62, "gate": 0.30, "master": 0.80,
+  "bass": 0.50, "mid": 0.45, "treble": 0.71
 }
 ```
 - 노브 값은 0~1로 저장하고 실제 dB/주파수 매핑은 펌웨어에서.
@@ -148,8 +148,8 @@ PC 쪽 `tools/nam2namb.py`가 만들고, 펌웨어는 헤더 검증(매직, 버�
 |---|---|
 | 노이즈 게이트 | 엔벨로프 팔로워(어택 1ms, 릴리즈 50ms) + 히스테리시스, 임계값 -80~-40dBFS |
 | 입력 게인 | -12~+24dB, 모델 앞 |
-| EQ | Bass: 로우셸프 120Hz, Mid: 피킹 700Hz Q 0.7, Treble: 하이셸프 3kHz, Presence: 하이셸프 5kHz. 각 ±12dB. 계수 계산은 loop()에서, 오디오에는 계수만 전달 |
-| 출력 레벨 | -40~+6dB, 출력단 소프트 클리퍼(tanh)로 디지털 클리핑 방지 |
+| EQ | 3밴드. Bass: 로우셸프 120Hz, Mid: 피킹 700Hz Q 0.7, Treble: 하이셸프 3kHz. 각 ±12dB. 계수 계산은 loop()에서, 오디오에는 계수만 전달 |
+| 마스터(출력 레벨) | -40~+6dB, 출력단 소프트 클리퍼(tanh)로 디지털 클리핑 방지 |
 | 바이패스 | 5~10ms 크로스페이드로 디지털 바이패스 |
 | (확장) 캐비닛 IR | 균일 분할 FFT 컨볼루션, IR 길이 512~1024. CPU 여유 있을 때만 |
 
@@ -183,35 +183,39 @@ IDLE → OPENING → READING(청크 4KB씩, loop() 1회당 1청크) → VALIDATI
 ### 8-2. 노브 페이지 (확정)
 | 페이지 | 포트 1 | 포트 2 | 포트 3 |
 |---|---|---|---|
-| AMP | Gain (`gain`) | Bass (`bass`) | Treble (`treble`) |
 | EQ | Bass (`bass`) | Mid (`mid`) | Treble (`treble`) |
-| OUT | Level (`level`) | Gate (`gate`) | Presence (`presence`) |
+| IN/OUT | Input Gain (`gain`) | Noise Gate (`gate`) | Master (`master`) |
 
-- 괄호는 프리셋 JSON 필드입니다. AMP와 EQ의 Bass·Treble은 **같은 파라미터**이고, AMP는 자주 쓰는 노브를 모은 바로가기입니다. 페이지를 바꾸면 캐치가 걸리므로 같은 값을 두 페이지에서 만져도 값이 튀지 않습니다.
+- 괄호는 프리셋 JSON 필드입니다. 파라미터는 이 6개가 전부이고, 페이지마다 겹치는 파라미터는 없습니다.
+- 페이지를 바꾸면 캐치가 걸리므로, 포트 위치가 새 페이지의 저장값을 지나기 전까지는 값이 바뀌지 않습니다.
+- 화면 라벨은 칸 폭(30px, 6x10 글꼴 5자) 때문에 Bass/Mid/Treb, Gain/Gate/Mstr로 줄여 씁니다.
 
 ### 8-3. 화면·상태 머신
 ```
 HOME(프리셋 보기)
   인코더 회전 → 프리셋 미리보기(이름만 바뀜) → 누름=로드 / 3초 무조작=취소
-  인코더 짧게 누름 → 노브 페이지 순환 AMP → EQ → OUT
+  인코더 짧게 누름 → 노브 페이지 전환 EQ ↔ IN/OUT
   인코더 길게 누름 → MENU
 MENU
   ├ Save Preset (덮어쓰기 / 새로 저장, 이름은 인코더로 문자 선택)
   ├ Select Model (/models 목록 → 현재 프리셋의 모델 교체)
   ├ Settings (입력/출력 코덱 레벨, 노브 커브, 화면 밝기)
   ├ USB Mode (MTP)
-  └ Info (CPU%, 메모리, 펌웨어 버전)
+  └ Info (CPU%, 메모리, 샘플레이트, 펌웨어 버전)
 ```
 
-HOME 화면 예시 (128x64):
+HOME 화면 예시 (128x32, 6x10 글꼴 3줄):
 ```
-[03] Plexi Crunch       BYP
-plexi_nano.namb
-AMP  Gain  Bass  Treb
-     6.2   5.0   7.1
-CPU 61%                48k
+[03] Plexi Crunch     BYP
+Bass  Mid  Treb   I [####  ]
+ 5.0  4.5   7.1   O [###   ]
 ```
-- 화면 라이브러리: U8g2(SH1106/SSD1306 둘 다 지원). 프레임버퍼 방식으로 변경 시에만 전송, 최대 20fps.
+- 1줄: 프리셋 번호와 이름(왼쪽), 바이패스 표시(오른쪽 끝).
+- 2~3줄 왼쪽(x 0~89): 현재 노브 페이지의 라벨과 값, 30px 3칸 가운데 정렬. 페이지가 바뀌어도 같은 포트는 같은 칸.
+- 2~3줄 오른쪽(x 92~127): 입력(I)/출력(O) 레벨 미터, 가로 막대. 오디오 쪽이 블록마다 피크값을 넘기고 UI가 dBFS(-48~0)를 0~1로 바꿔 그림.
+- 모델 파일명은 HOME에 없음(Select Model에서 확인). CPU%와 샘플레이트는 MENU > Info에서.
+- 배치와 좌표는 `sketches/04_oled_display`에 있음. 5x7 글꼴 4줄(모델 파일명 줄 추가) 배치도 같은 스케치에서 비교 가능.
+- 화면: Waveshare 2.23" OLED 128x32 SPI (SSD1305). 라이브러리 U8g2, 생성자 `U8G2_SSD1305_128X32_ADAFRUIT_F_4W_HW_SPI`(Waveshare는 Adafruit와 같은 설정). 프레임버퍼 방식으로 변경 시에만 전송, 최대 20fps. 미터가 움직이는 동안은 매 프레임 바뀜.
 - 노브를 돌리는 동안 1.5초간 해당 파라미터 큰 글씨 팝업.
 
 ---
@@ -272,10 +276,10 @@ tools/
 - 앰프 모델: Neural Amp Modeler. 공식 코어는 무거우므로 A2-Lite(1순위), LSTM(hidden ≤ 24), A1 WaveNet Nano(Feather는 벤치마크 후)의 순전파만
   Arduino 의존성 없는 순수 C++ + CMSIS-DSP로 재구현한다. 가중치 로딩 순서는 공식 NeuralAmpModelerCore와 1:1 동일해야 한다.
 - 모델 파일: PC에서 .nam(JSON) → .namb(자체 바이너리: 매직 "NAMB", 버전, 아키텍처, 샘플레이트, 설정 블록, float32 가중치, 메타데이터 TLV, CRC32) 변환. SD /models/.
-- 프리셋: SD /presets/*.json (이름, 모델 파일명, gain/bass/mid/treble/presence/level/gate 0~1). 상태: /system/state.json.
-- 신호 체인: 노이즈게이트 → 입력 게인 → NAM → EQ(Bass 로우셸프, Mid 피킹, Treble/Presence 하이셸프) → 출력 레벨 → 소프트 클리퍼. 디지털 바이패스(페이드). FX 루프는 아날로그라 펌웨어와 무관.
-- 조작계: B10K 포트 3개(페이지 AMP: Gain/Bass/Treble, EQ: Bass/Mid/Treble, OUT: Level/Gate/Presence, 캐치 방식),
-  EC11 인코더(회전=프리셋/값, 짧게=페이지, 길게=메뉴), 풋스위치(짧게=바이패스, 길게 600ms=다음 프리셋), 1.3" OLED 128x64 SPI(U8g2).
+- 프리셋: SD /presets/*.json (이름, 모델 파일명, gain/gate/master/bass/mid/treble 0~1). 상태: /system/state.json.
+- 신호 체인: 노이즈게이트 → 입력 게인 → NAM → EQ 3밴드(Bass 로우셸프, Mid 피킹, Treble 하이셸프) → 마스터 → 소프트 클리퍼. 디지털 바이패스(페이드). FX 루프는 아날로그라 펌웨어와 무관.
+- 조작계: B10K 포트 3개(페이지 EQ: Bass/Mid/Treble, IN/OUT: Input Gain/Noise Gate/Master, 캐치 방식),
+  EC11 인코더(회전=프리셋/값, 짧게=페이지, 길게=메뉴), 풋스위치(짧게=바이패스, 길게 600ms=다음 프리셋), Waveshare 2.23" OLED 128x32 SPI(SSD1305, U8g2), HOME에 입력/출력 레벨 미터.
 - 핀: 포트 14/15/16, 인코더 2/3/4, 풋스위치 5, LED 9, OLED SPI 11/13 + CS 10 + DC 24 + RST 25 (회로 쪽 확정 전 초안).
 
 [규칙]
@@ -289,7 +293,8 @@ tools/
 [지금까지 결정된 것]
 - 48kHz는 build_flags -DAUDIO_SAMPLE_RATE_EXACT=48000.0f + SGTL5000 CHIP_CLK_CTRL=0x0008(Codec48k). 보드 검증은 S0, 06은 독립 PlatformIO 프로젝트 (software-design.md 3장)
 - 모델 교체는 5ms 페이드아웃 → 포인터 교체 → 5ms 페이드인. 크로스페이드는 모델 1개 CPU 35% 이하일 때만 (software-design.md 7장)
-- 노브 페이지 AMP: Gain/Bass/Treble, EQ: Bass/Mid/Treble, OUT: Level/Gate/Presence. AMP와 EQ의 Bass·Treble은 같은 파라미터 (software-design.md 8-2절)
+- 노브 페이지 EQ: Bass/Mid/Treble, IN/OUT: Input Gain/Noise Gate/Master(`master`), 인코더 짧게로 전환. Presence 없음, 파라미터 6개 (software-design.md 8-2절)
+- 화면 Waveshare 2.23" SSD1305 128x32, HOME은 6x10 3줄(프리셋 / 노브 라벨·값 + I/O 미터) (software-design.md 8-3절)
 - .namb 설정 블록 길이 N은 4의 배수, 파서는 N % 4 != 0이면 거부, 읽기 버퍼는 alignas(4) 이상 (software-design.md 5-1절)
 - 풋스위치 짧게 = 바이패스, 길게 600ms = 다음 프리셋(마지막 다음은 첫 프리셋). 이전 프리셋은 인코더로 (software-design.md 8-1절)
 - (단계가 끝날 때마다 여기에 추가: 벤치마크 결과, 지원 아키텍처, 핀 확정 등)
@@ -300,9 +305,8 @@ tools/
 S0를 하자.
 1. software-design.md 3장에 정리한 48kHz 방법(build_flags -DAUDIO_SAMPLE_RATE_EXACT=48000.0f, Codec48k로 SYS_FS 덮어쓰기)을
    sketches/06_nam_benchmark(독립 PlatformIO 프로젝트) 구조로 보드에서 검증하고, 1kHz 사인 주파수 측정값을
-   tools/benchmark_report.md의 "48kHz 설정 검증"에 기록. 3장의 (확인 필요) 두 개도 같이 확인:
+   tools/benchmark_report.md의 "48kHz 설정 검증"에 기록. 3장의 (확인 필요)도 같이 확인:
    - SYS_FS를 44.1kHz로 둔 채(setSysFs48k() 호출 생략) 48kHz 클럭을 넣었을 때 달라지는 점(주파수, 잡음, 왜곡). SGTL5000 데이터시트 CHIP_CLK_CTRL 설명 근거 포함
-   - Arduino IDE(Teensyduino)에서 AUDIO_SAMPLE_RATE_EXACT를 코어·라이브러리 전역으로 정의하는 방법이 있는지(platform.txt/boards.txt 근거)
 2. NAM 공식 코드 기준으로 A2-Lite, LSTM(hidden 16, 24), A1 WaveNet Nano, Feather의 레이어 구성과 샘플당 MAC 수, tanh 호출 수를 계산하고 근거 파일을 밝혀줘.
 3. 더미 가중치로 각 아키텍처 순전파를 돌리는 벤치마크 AudioStream 객체. 600MHz/816MHz, std::tanh/근사 tanh 조합별 AudioProcessorUsageMax를 시리얼로 출력.
 4. 결과 기록용 benchmark_report.md 양식과 "CPU 70% 이하" 기준의 지원 아키텍처 결정 방법.
@@ -341,7 +345,7 @@ S3: ModelLoader와 프리셋 시스템.
 S4: UI를 만들자.
 - 상태 머신(HOME, 프리셋 미리보기, 페이지 순환, MENU: Save/Select Model/Settings/USB Mode/Info)을 텍스트 다이어그램으로 먼저 보여주고 코드로.
 - 포트: 이동평균+히스테리시스, 캐치 방식, 잠금 중 화면 표시. 인코더: Encoder 라이브러리, 짧게/길게 구분. 풋스위치: 디바운스, 600ms 도달 즉시 길게 판정.
-- U8g2 SH1106 SPI, 변경 시에만 최대 20fps 갱신, 노브 조작 시 1.5초 팝업.
+- U8g2 SSD1305 128x32 SPI(Waveshare 2.23"), 변경 시에만 최대 20fps 갱신, HOME에 I/O 레벨 미터, 노브 조작 시 1.5초 팝업.
 - UI는 Params 구조체만 바꾸고 오디오 코드는 직접 건드리지 않게.
 ```
 

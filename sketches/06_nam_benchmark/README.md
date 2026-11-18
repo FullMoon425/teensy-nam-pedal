@@ -5,7 +5,7 @@
 
 ## 빌드 방법: 독립 PlatformIO 프로젝트
 
-01~05와 달리 **PlatformIO로 빌드**합니다. 48kHz는 `-DAUDIO_SAMPLE_RATE_EXACT=48000.0f`를 코어와 Audio 라이브러리까지 같이 적용해야 하는데, Arduino IDE 스케치 안의 `#define`으로는 라이브러리에 적용되지 않기 때문입니다.
+01~05와 같은 독립 PlatformIO 프로젝트이고, 다른 점은 `build_flags`의 48kHz 설정입니다. 48kHz는 `-DAUDIO_SAMPLE_RATE_EXACT=48000.0f`를 코어와 Audio 라이브러리까지 같이 적용해야 하는데, 소스 안의 `#define`으로는 라이브러리에 적용되지 않기 때문입니다.
 
 ```
 sketches/06_nam_benchmark/

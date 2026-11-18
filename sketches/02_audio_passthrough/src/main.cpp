@@ -4,6 +4,7 @@
 // 주의: Teensy Audio Library 기본 샘플레이트는 44.1kHz입니다.
 // 48kHz 설정은 06_nam_benchmark(S0)에서 검증합니다.
 
+#include <Arduino.h>
 #include <Audio.h>
 
 AudioInputI2S        audioIn;
