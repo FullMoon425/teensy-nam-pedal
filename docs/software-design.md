@@ -158,7 +158,7 @@ PC 쪽 `tools/nam2namb.py`가 만들고, 펌웨어는 헤더 검증(매직, 버�
 | EQ | 3밴드. Bass: 로우셸프 120Hz, Mid: 피킹 700Hz Q 0.7, Treble: 하이셸프 3kHz. 각 ±12dB. 계수 계산은 loop()에서, 오디오에는 계수만 전달 |
 | 마스터(출력 레벨) | -40~+6dB, 출력단 소프트 클리퍼(tanh)로 디지털 클리핑 방지 |
 | 바이패스 | 5~10ms 크로스페이드로 디지털 바이패스 |
-| **캐비닛 IR (MVP)** | NAM 뒤, EQ 앞. 균일 분할 overlap-save 컨볼루션: 분할 = 블록 128, FFT 256(CMSIS `arm_rfft_fast_f32`), 블록마다 FFT 2번 + 복소 곱셈 분할 수×129번. 추가 지연 없음. 최대 길이는 06 측정 후 확정(후보 2048 또는 4096샘플 = 43/85ms). 구현 출발점: `sketches/06_nam_benchmark/src/bench_ir.h` (PC에서 직접 컨볼루션과 최대 오차 4e-7). 저장소는 RAM2(DMAMEM) |
+| **캐비닛 IR (MVP)** | NAM 뒤, EQ 앞. 균일 분할 overlap-save 컨볼루션: 분할 = 블록 128, FFT 256(CMSIS `arm_rfft_fast_f32`), 블록마다 FFT 2번 + 복소 곱셈 분할 수×129번. 추가 지연 없음. **최대 길이 4096샘플 = 85ms (확정)**, 더 긴 파일은 앞부분만 씀. S0 측정(600MHz): IR만 1024 2.2% / 2048 3.4% / 4096 7.2%, A2-Lite + IR 4096 = 56.6%. 구현 출발점: `sketches/06_nam_benchmark/src/bench_ir.h` (PC에서 직접 컨볼루션과 최대 오차 4e-7). 저장소는 RAM2(DMAMEM) |
 
 IR 구현 메모:
 - **CMSIS 초기화 주의**: `arm_rfft_fast_init_f32()`는 길이별 switch로 모든 크기(최대 4096)의 트위들 표를 참조해서, Teensy 4에서는 이 const 표가 전부 RAM1(DTCM)에 올라갑니다(06에서 측정: 약 77KB). 256용 표(`twiddleCoef_128`, `armBitRevIndexTable128`, `twiddleCoef_rfft_256`)만 인스턴스에 직접 연결합니다(`bench_ir.h`의 `RealFft256::init()`).
@@ -183,7 +183,7 @@ IDLE → OPENING → READING(청크 4KB씩, loop() 1회당 1청크) → VALIDATI
 - **IR 로딩 (`storage/IrLoader`)**: 모델과 같은 방식으로 `loop()`에서 비차단으로 진행합니다.
   ```
   IDLE → OPENING → HEADER(RIFF/fmt/data 확인: 48kHz, 모노(스테레오면 L만), PCM 16/24비트 또는 float32)
-       → READING(청크 단위, 최대 길이에서 자름) → NORMALIZING → SPECTRUM(loop 1회당 분할 1개씩 FFT, 대기 슬롯에)
+       → READING(청크 단위, 4096샘플에서 자름) → NORMALIZING → SPECTRUM(loop 1회당 분할 1개씩 FFT, 대기 슬롯에)
        → READY → (페이드아웃 → IR 포인터 교체 → 페이드인) → IDLE
   실패 시 → ERROR(기존 IR 유지, 화면 표시) → IDLE
   ```
@@ -322,8 +322,8 @@ tools/
 - .namb 설정 블록 길이 N은 4의 배수, 파서는 N % 4 != 0이면 거부, 읽기 버퍼는 alignas(4) 이상 (software-design.md 5-1절)
 - 풋스위치 짧게 = 바이패스, 길게 600ms = 다음 프리셋(마지막 다음은 첫 프리셋). 이전 프리셋은 인코더로 (software-design.md 8-1절)
 - S0: 지원 아키텍처는 A2-Lite만, 600MHz에서 CPU max 49.6%(기준 70%). A1·LSTM·A2-Full 미지원. 클럭 600MHz, 크로스페이드 없음. 기준 소스는 NeuralAmpModelerCore NAM/wavenet/a2_fast.cpp, 출발 코드는 sketches/06_nam_benchmark/src/bench_models.h (tools/benchmark_report.md)
-- 캐비닛 IR은 MVP. NAM 뒤 EQ 앞, 분할 128/FFT 256 overlap-save, CMSIS rfft는 256용 표만 직접 연결(init 함수 쓰면 RAM1 77KB 낭비), 출발 코드 sketches/06_nam_benchmark/src/bench_ir.h (software-design.md 6·7장)
-- (단계가 끝날 때마다 여기에 추가: 48kHz 주파수 검증, IR 최대 길이, 핀 확정 등)
+- 캐비닛 IR은 MVP, 최대 4096샘플(85ms), 600MHz에서 A2-Lite + IR 4096 = 56.6%. NAM 뒤 EQ 앞, 분할 128/FFT 256 overlap-save, CMSIS rfft는 256용 표만 직접 연결(init 함수 쓰면 RAM1 77KB 낭비), 출발 코드 sketches/06_nam_benchmark/src/bench_ir.h (software-design.md 6·7장)
+- (단계가 끝날 때마다 여기에 추가: 48kHz 주파수 검증, 핀 확정 등)
 ```
 
 ### S0 실현 가능성 벤치마크 (CPU 측정 완료, 결과는 tools/benchmark_report.md)
