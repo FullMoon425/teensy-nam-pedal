@@ -22,6 +22,7 @@
                    ├ int16 → float
                    ├ 노이즈게이트 → 입력 게인
                    ├ NAM 추론 (현재 모델 포인터)
+                   ├ 캐비닛 IR 컨볼루션 (현재 IR 포인터, 없으면 건너뜀)
                    ├ (교체 중이면 페이드아웃 → 포인터 교체 → 페이드인)
                    ├ EQ 바이쿼드 3단 → 마스터 → 바이패스 페이드
                    └ float → int16 (소프트 클리핑)
@@ -31,10 +32,11 @@
   UI.handle(evt)   상태 머신 → 파라미터 변경 요청 / 프리셋 변경 요청
   Params.commit()  변경된 파라미터를 오디오 쪽에 원자적으로 전달
   ModelLoader.step()  SD에서 조금씩 읽기 → 검증 → 준비 완료 시 교체 요청
+  IrLoader.step()     IR wav 조금씩 읽기 → 분할 스펙트럼 계산 → 준비 완료 시 교체 요청
   Display.refresh() 변경 있을 때만, 최대 20fps
 ```
 
-- 오디오 ↔ 메인 간 데이터 전달: 파라미터는 `struct Params`를 더블 버퍼로 두고 `volatile` 인덱스 교체(블록 경계에서 반영). 모델 교체는 포인터 1개 교체(32비트 쓰기는 원자적)로 처리.
+- 오디오 ↔ 메인 간 데이터 전달: 파라미터는 `struct Params`를 더블 버퍼로 두고 `volatile` 인덱스 교체(블록 경계에서 반영). 모델·IR 교체는 각각 포인터 1개 교체(32비트 쓰기는 원자적)로 처리.
 - 파라미터 스무딩: 게인·레벨·EQ 변경은 블록 내 선형 보간(지퍼 노이즈 방지).
 
 ---
@@ -68,18 +70,20 @@
 ### 4-1. 지원 범위
 | 아키텍처 | 상태 |
 |---|---|
-| **A2-Lite** | **1순위 (확정).** A2 파일에서 Lite(3채널) 부분만 추출 |
-| LSTM (hidden ≤ 24, 1~2층) | 지원 (예비) |
-| A1 WaveNet Nano | 지원 (예비) |
-| A1 WaveNet Feather | 벤치마크 후 결정 |
-| A1 Lite/Standard, A2-Full | 미지원. 변환기에서 거부 |
+| **A2-Lite** | **유일한 지원 대상 (확정).** A2 파일에서 Lite(3채널) 부분만 추출. S0: 600MHz CPU max 49.6% |
+| A1 WaveNet (Nano~Standard), LSTM | 미지원 (확정). 변환기에서 거부. S0: 600MHz에서 근사 tanh를 써도 70% 초과 (Nano 84%, LSTM 2×8 77%) |
+| A2-Full | 미지원 (확정). 연산량이 A2-Lite의 약 7배 |
+
+근거와 측정값: [tools/benchmark_report.md](../tools/benchmark_report.md). CPU 클럭은 **600MHz (확정)**, 오버클럭 없음.
 
 ### 4-2. 구현 방침
-- A2-Lite는 공식 NeuralAmpModelerCore의 A2 구현(임베디드용 활성화 함수 포함)을 기준으로 재구현합니다. Daisy Seed 커뮤니티 구현(블록 48샘플, CPU 약 53%, DTCM 배치)이 참고 사례입니다 (확인 필요: 공식 코어의 A2 소스 위치와 Lite 추출 방법).
-- A1/LSTM은 공식 NeuralAmpModelerCore의 `wavenet.cpp`, `lstm.cpp`, `dsp.cpp` 동작을 그대로 따르되 Eigen 대신 고정 크기 배열 + CMSIS-DSP(`arm_dot_prod_f32` 등)로 재구현.
+- 기준 소스: 공식 NeuralAmpModelerCore `NAM/wavenet/a2_fast.{h,cpp}` (A2 전용 경로, `A2FastModel<3>`이 A2-Lite). 구조가 고정입니다: 23층 = dilation `1,3,7,17,41,101,239` 묶음(커널 6) 3개, 그중 2번째와 3번째 묶음 사이에 커널 15 층 2개(dilation `1`, `13`). 채널 3(= bottleneck), LeakyReLU 0.01, 게이트·FiLM 없음, layer1x1 있음, 헤드 = 커널 16 컨볼루션(3 → 1, bias), 가중치 스트림 마지막 값이 head_scale. 가중치 읽는 순서도 같은 파일 `_load_weights()`에 있습니다.
+- A2 `.nam` 파일은 `SlimmableContainer`이고 `submodels`에 Lite(`max_value` 0.5, channels 3)와 Full(1.0, channels 8)이 들어 있습니다(공식 `example_models/A2.nam`). 변환기는 channels 3 서브모델만 꺼냅니다.
+- 벤치마크 구현 `sketches/06_nam_benchmark/src/bench_models.h`의 `A2Lite`를 출발점으로 씁니다(PC에서 단순 기준 구현과 최대 오차 6e-9 확인).
 - **가중치 로딩 순서는 공식 코어와 1:1 동일**해야 합니다. 여기가 버그가 가장 많이 나는 곳이라 PC 비교 테스트를 반드시 통과시킵니다.
-- WaveNet dilated conv는 레이어별 링버퍼(길이 = dilation × (kernel-1) + 블록)로 구현.
-- `tanh`는 빠른 근사(유리함수 또는 테이블+보간)로 교체 후 오차 측정. 오차 1e-4 이하면 채택.
+- dilated conv는 레이어별 링버퍼(길이 = dilation × (kernel-1) + 블록, 뒤에 블록 길이 미러)로 구현. 상태 메모리 약 147KB.
+- tanh는 쓰지 않습니다(LeakyReLU). LeakyReLU는 `fmaxf(a, 0.01f * a)`로 분기 없이 계산(VMAXNM).
+- 핫루프에서 포인터는 `__restrict`, 입력은 지역 변수로 한 번만 읽고 출력 채널을 번갈아 누적합니다. S0에서 이것만으로 76.5% → 49.1%가 됐습니다(benchmark_report.md 2절).
 - 핫루프 함수는 `FASTRUN`(ITCM), 가중치·상태는 `DMAMEM` 대신 DTCM 우선 배치(크기가 작아서 가능).
 - 모델 메타데이터의 `loudness`, `input_level_dbu`, `output_level_dbu`가 있으면 입출력 레벨 정규화에 사용.
 
@@ -105,7 +109,7 @@ NamModel* createModel(const NambHeader& h, const float* weights, ModelSlot& slot
 |---|---|---|
 | 0 | 4 | 매직 `"NAMB"` |
 | 4 | 2 | 포맷 버전 (1) |
-| 6 | 2 | 아키텍처 (1=LSTM, 2=A1 WaveNet, 3=A2-Lite) |
+| 6 | 2 | 아키텍처 (3=A2-Lite만 지원. 1, 2는 예약) |
 | 8 | 4 | 샘플레이트 (48000) |
 | 12 | 4 | 설정 블록 길이 N (**4의 배수**) |
 | 16 | N | 아키텍처 설정 (레이어 수, 채널, 커널, dilation 목록, head 설정 등, 고정 구조체). 4의 배수가 되도록 끝을 0으로 채움 |
@@ -125,17 +129,20 @@ PC 쪽 `tools/nam2namb.py`가 만들고, 펌웨어는 헤더 검증(매직, 버�
 ```json
 {
   "name": "Plexi Crunch",
-  "model": "plexi_nano.namb",
+  "model": "plexi_crunch.namb",
+  "ir": "v30_sm57.wav",
   "gain": 0.62, "gate": 0.30, "master": 0.80,
   "bass": 0.50, "mid": 0.45, "treble": 0.71
 }
 ```
+- `ir`: `/irs` 안의 파일명. 빈 문자열 `""`이면 IR 없음(앰프+캐비닛 통째 캡처 모델). 필드가 없어도 없음으로 처리.
 - 노브 값은 0~1로 저장하고 실제 dB/주파수 매핑은 펌웨어에서.
 - `/system/state.json`에 마지막 프리셋 번호, 바이패스 상태 저장(부팅 시 복원). 쓰기는 변경 후 2초 지연(디바운스)으로 SD 수명 보호.
 
 ### 5-3. SD 폴더 구조
 ```
 /models/    *.namb
+/irs/       *.wav  (캐비닛 IR, 48kHz 모노)
 /presets/   01_clean.json ...
 /system/    state.json, settings.json(코덱 레벨, 노브 커브 등)
 ```
@@ -151,7 +158,13 @@ PC 쪽 `tools/nam2namb.py`가 만들고, 펌웨어는 헤더 검증(매직, 버�
 | EQ | 3밴드. Bass: 로우셸프 120Hz, Mid: 피킹 700Hz Q 0.7, Treble: 하이셸프 3kHz. 각 ±12dB. 계수 계산은 loop()에서, 오디오에는 계수만 전달 |
 | 마스터(출력 레벨) | -40~+6dB, 출력단 소프트 클리퍼(tanh)로 디지털 클리핑 방지 |
 | 바이패스 | 5~10ms 크로스페이드로 디지털 바이패스 |
-| (확장) 캐비닛 IR | 균일 분할 FFT 컨볼루션, IR 길이 512~1024. CPU 여유 있을 때만 |
+| **캐비닛 IR (MVP)** | NAM 뒤, EQ 앞. 균일 분할 overlap-save 컨볼루션: 분할 = 블록 128, FFT 256(CMSIS `arm_rfft_fast_f32`), 블록마다 FFT 2번 + 복소 곱셈 분할 수×129번. 추가 지연 없음. **최대 길이 4096샘플 = 85ms (확정)**, 더 긴 파일은 앞부분만 씀. S0 측정(600MHz): IR만 1024 2.2% / 2048 3.4% / 4096 7.2%, A2-Lite + IR 4096 = 56.6%. 구현 출발점: `sketches/06_nam_benchmark/src/bench_ir.h` (PC에서 직접 컨볼루션과 최대 오차 4e-7). 저장소는 RAM2(DMAMEM) |
+
+IR 구현 메모:
+- **CMSIS 초기화 주의**: `arm_rfft_fast_init_f32()`는 길이별 switch로 모든 크기(최대 4096)의 트위들 표를 참조해서, Teensy 4에서는 이 const 표가 전부 RAM1(DTCM)에 올라갑니다(06에서 측정: 약 77KB). 256용 표(`twiddleCoef_128`, `armBitRevIndexTable128`, `twiddleCoef_rfft_256`)만 인스턴스에 직접 연결합니다(`bench_ir.h`의 `RealFft256::init()`).
+- `arm_rfft_fast_f32()`는 입력 버퍼를 덮어씁니다. 입력은 항상 버려도 되는 임시 버퍼로 넘깁니다.
+- `dsp/IrConv`는 FFT를 감싼 클래스로 두고 PC 빌드에서는 같은 출력 형식의 기준 DFT를 씁니다(test_pc에서 직접 컨볼루션과 비교).
+- IR 레벨: 로딩할 때 IR 에너지(제곱합)로 정규화해서 IR마다 음량이 크게 달라지지 않게 합니다. 정규화 기준은 S2에서 실제 IR로 정합니다.
 
 ---
 
@@ -165,8 +178,18 @@ IDLE → OPENING → READING(청크 4KB씩, loop() 1회당 1청크) → VALIDATI
 실패 시 어느 단계에서든 → ERROR(기존 모델 유지, 화면 표시) → IDLE
 ```
 - **교체 방식 (확정): 5ms 페이드아웃 → 교체 → 5ms 페이드인.** 교체 중 약 10ms 동안 소리가 작아지지만 모델은 항상 1개만 돕니다.
-- 크로스페이드(10~20ms)는 그동안 두 모델이 동시에 돌아 CPU가 2배가 됩니다. **S0 결과 모델 1개의 CPU 최대치가 35% 이하(2배여도 70% 기준 이내)일 때만** 선택지로 둡니다.
+- 크로스페이드(10~20ms)는 그동안 두 모델이 동시에 돌아 CPU가 2배가 됩니다. 모델 1개의 CPU 최대치가 35% 이하일 때만 가능한데, **S0 결과 A2-Lite가 49.6%라 쓰지 않습니다 (확정).**
 - 프리셋만 바뀌고 모델이 같으면 로딩 생략, 파라미터만 교체.
+- **IR 로딩 (`storage/IrLoader`)**: 모델과 같은 방식으로 `loop()`에서 비차단으로 진행합니다.
+  ```
+  IDLE → OPENING → HEADER(RIFF/fmt/data 확인: 48kHz, 모노(스테레오면 L만), PCM 16/24비트 또는 float32)
+       → READING(청크 단위, 4096샘플에서 자름) → NORMALIZING → SPECTRUM(loop 1회당 분할 1개씩 FFT, 대기 슬롯에)
+       → READY → (페이드아웃 → IR 포인터 교체 → 페이드인) → IDLE
+  실패 시 → ERROR(기존 IR 유지, 화면 표시) → IDLE
+  ```
+  - 48kHz가 아닌 IR은 거부합니다(화면에 이유 표시). 변환은 PC에서 합니다.
+  - 스펙트럼 슬롯 2개(현재/대기)는 RAM2에 정적으로 잡습니다. 주파수 지연선(FDL)은 하나를 같이 쓰고 교체할 때 0으로 비웁니다.
+  - 프리셋이 모델과 IR을 둘 다 바꾸면 **둘 다 준비될 때까지 기다렸다가 페이드아웃 한 번에 같이 교체**합니다(페이드가 두 번 들리지 않게). IR이 같으면 로딩을 생략합니다.
 - **(선택) USB MTP**: `MTP_Teensy` 라이브러리로 PC에서 SD에 파일 복사. MTP 쓰기 중 SD 동시 접근 충돌 방지 위해 "USB 모드" 화면에서만 활성화하고, 종료 시 모델 목록 다시 스캔.
 
 ---
@@ -199,6 +222,7 @@ HOME(프리셋 보기)
 MENU
   ├ Save Preset (덮어쓰기 / 새로 저장, 이름은 인코더로 문자 선택)
   ├ Select Model (/models 목록 → 현재 프리셋의 모델 교체)
+  ├ Select IR (/irs 목록 + None → 현재 프리셋의 IR 교체)
   ├ Settings (입력/출력 코덱 레벨, 노브 커브, 화면 밝기)
   ├ USB Mode (MTP)
   └ Info (CPU%, 메모리, 샘플레이트, 펌웨어 버전)
@@ -213,7 +237,7 @@ Bass  Mid  Treb   I [####  ]
 - 1줄: 프리셋 번호와 이름(왼쪽), 바이패스 표시(오른쪽 끝).
 - 2~3줄 왼쪽(x 0~89): 현재 노브 페이지의 라벨과 값, 30px 3칸 가운데 정렬. 페이지가 바뀌어도 같은 포트는 같은 칸.
 - 2~3줄 오른쪽(x 92~127): 입력(I)/출력(O) 레벨 미터, 가로 막대. 오디오 쪽이 블록마다 피크값을 넘기고 UI가 dBFS(-48~0)를 0~1로 바꿔 그림.
-- 모델 파일명은 HOME에 없음(Select Model에서 확인). CPU%와 샘플레이트는 MENU > Info에서.
+- 모델·IR 파일명은 HOME에 없음(Select Model, Select IR에서 확인). CPU%와 샘플레이트는 MENU > Info에서.
 - 배치와 좌표는 `sketches/04_oled_display`에 있음. 5x7 글꼴 4줄(모델 파일명 줄 추가) 배치도 같은 스케치에서 비교 가능.
 - 화면: Waveshare 2.23" OLED 128x32 SPI (SSD1305). 라이브러리 U8g2, 생성자 `U8G2_SSD1305_128X32_ADAFRUIT_F_4W_HW_SPI`(Waveshare는 Adafruit와 같은 설정). 프레임버퍼 방식으로 변경 시에만 전송, 최대 20fps. 미터가 움직이는 동안은 매 프레임 바뀜.
 - 노브를 돌리는 동안 1.5초간 해당 파라미터 큰 글씨 팝업.
@@ -227,9 +251,9 @@ firmware/                      (PlatformIO, board = teensy41)
   platformio.ini
   src/main.cpp
   src/audio/AudioEffectNAM.{h,cpp}
-  src/nam/{NamModel.h, Lstm.cpp, WaveNet.cpp, Activations.h, NambFormat.h}
-  src/dsp/{Gate, Biquad, Gain, SoftClip}.{h,cpp}
-  src/storage/{ModelLoader, Presets, SystemState}.{h,cpp}
+  src/nam/{NamModel.h, A2Lite.{h,cpp}, NambFormat.h}
+  src/dsp/{Gate, Biquad, Gain, SoftClip, IrConv}.{h,cpp}
+  src/storage/{ModelLoader, IrLoader, Presets, SystemState}.{h,cpp}
   src/ui/{Inputs, Pages, Menu, Display}.{h,cpp}
   src/Params.h                 오디오↔UI 공유 파라미터
 test_pc/                       PC용 CMake, nam/ 와 dsp/ 를 그대로 빌드
@@ -248,16 +272,16 @@ tools/
 
 | 단계 | 내용 | 완료 기준 |
 |---|---|---|
-| **S0 ★** | 48kHz 패스스루 + 아키텍처별 CPU 벤치마크 | 지원 아키텍처 확정, `benchmark_report.md` |
+| **S0 ★** | 48kHz 패스스루 + 아키텍처별 CPU 벤치마크 | 지원 아키텍처 확정, `benchmark_report.md` (**CPU 측정 완료: A2-Lite만**, 48kHz 주파수 검증 남음) |
 | **S1 ★** | `nam2namb.py`, `make_reference.py`, PC 빌드 엔진 | PC에서 기준 출력과 최대 오차 1e-4 이하 |
-| **S2 ★** | AudioEffectNAM으로 보드에서 모델 재생 | 실제 기타로 모델 톤 확인, CPU% 기록 |
-| **S3 ★** | ModelLoader, 프리셋, 상태 저장 | 연속 전환 100회 끊김·크래시 없음 |
+| **S2 ★** | AudioEffectNAM으로 보드에서 모델 + IR 재생 | 실제 기타로 모델+IR 톤 확인, CPU% 기록 |
+| **S3 ★** | ModelLoader, IrLoader, 프리셋, 상태 저장 | 연속 전환 100회 끊김·크래시 없음 |
 | **S4 ★** | 입력 처리, 페이지, 캐치, 풋스위치, 화면 | 모든 조작이 사양대로 동작 |
 | S5 | 메뉴(저장/모델 선택/설정), 에러 처리 | SD 제거·손상 파일에서도 소리 유지 |
-| S6 | 확장: MTP, 릴레이 바이패스 제어, IR | 시간 남을 때 |
+| S6 | 확장: MTP, 릴레이 바이패스 제어 | 시간 남을 때 |
 
 ### 테스트 항목
-- 단위(PC): 가중치 로딩 순서, LSTM/WaveNet 출력 비교, 바이쿼드 주파수 응답, `.namb` 파서의 손상 파일 거부.
+- 단위(PC): 가중치 로딩 순서, A2-Lite 출력 비교, IR 컨볼루션과 직접 컨볼루션 비교, 바이쿼드 주파수 응답, `.namb`·wav 파서의 손상 파일 거부.
 - 보드: CPU 최대치(`AudioProcessorUsageMax`), 오디오 메모리 사용(`AudioMemoryUsageMax`), 모델 전환 중 클릭 유무, 1시간 연속 동작.
 
 ---
@@ -273,11 +297,11 @@ tools/
 [프로젝트]
 - Teensy 4.1 (Cortex-M7 600MHz, 단정밀 FPU, RAM 1MB), PJRC Audio Shield Rev D(SGTL5000), Teensy Audio Library, PlatformIO.
 - 샘플레이트 48kHz, 블록 128샘플, float32 처리.
-- 앰프 모델: Neural Amp Modeler. 공식 코어는 무거우므로 A2-Lite(1순위), LSTM(hidden ≤ 24), A1 WaveNet Nano(Feather는 벤치마크 후)의 순전파만
+- 앰프 모델: Neural Amp Modeler. 공식 코어는 무거우므로 A2-Lite의 순전파만
   Arduino 의존성 없는 순수 C++ + CMSIS-DSP로 재구현한다. 가중치 로딩 순서는 공식 NeuralAmpModelerCore와 1:1 동일해야 한다.
 - 모델 파일: PC에서 .nam(JSON) → .namb(자체 바이너리: 매직 "NAMB", 버전, 아키텍처, 샘플레이트, 설정 블록, float32 가중치, 메타데이터 TLV, CRC32) 변환. SD /models/.
-- 프리셋: SD /presets/*.json (이름, 모델 파일명, gain/gate/master/bass/mid/treble 0~1). 상태: /system/state.json.
-- 신호 체인: 노이즈게이트 → 입력 게인 → NAM → EQ 3밴드(Bass 로우셸프, Mid 피킹, Treble 하이셸프) → 마스터 → 소프트 클리퍼. 디지털 바이패스(페이드). FX 루프는 아날로그라 펌웨어와 무관.
+- 프리셋: SD /presets/*.json (이름, 모델 파일명, IR 파일명(빈 문자열 = 없음), gain/gate/master/bass/mid/treble 0~1). 상태: /system/state.json.
+- 신호 체인: 노이즈게이트 → 입력 게인 → NAM → 캐비닛 IR(분할 FFT 컨볼루션, SD /irs/*.wav 48kHz 모노) → EQ 3밴드(Bass 로우셸프, Mid 피킹, Treble 하이셸프) → 마스터 → 소프트 클리퍼. 디지털 바이패스(페이드). FX 루프는 아날로그라 펌웨어와 무관.
 - 조작계: B10K 포트 3개(페이지 EQ: Bass/Mid/Treble, IN/OUT: Input Gain/Noise Gate/Master, 캐치 방식),
   EC11 인코더(회전=프리셋/값, 짧게=페이지, 길게=메뉴), 풋스위치(짧게=바이패스, 길게 600ms=다음 프리셋), Waveshare 2.23" OLED 128x32 SPI(SSD1305, U8g2), HOME에 입력/출력 레벨 미터.
 - 핀: 포트 14/15/16, 인코더 2/3/4, 풋스위치 5, LED 9, OLED SPI 11/13 + CS 10 + DC 24 + RST 25 (회로 쪽 확정 전 초안).
@@ -297,10 +321,12 @@ tools/
 - 화면 Waveshare 2.23" SSD1305 128x32, HOME은 6x10 3줄(프리셋 / 노브 라벨·값 + I/O 미터) (software-design.md 8-3절)
 - .namb 설정 블록 길이 N은 4의 배수, 파서는 N % 4 != 0이면 거부, 읽기 버퍼는 alignas(4) 이상 (software-design.md 5-1절)
 - 풋스위치 짧게 = 바이패스, 길게 600ms = 다음 프리셋(마지막 다음은 첫 프리셋). 이전 프리셋은 인코더로 (software-design.md 8-1절)
-- (단계가 끝날 때마다 여기에 추가: 벤치마크 결과, 지원 아키텍처, 핀 확정 등)
+- S0: 지원 아키텍처는 A2-Lite만, 600MHz에서 CPU max 49.6%(기준 70%). A1·LSTM·A2-Full 미지원. 클럭 600MHz, 크로스페이드 없음. 기준 소스는 NeuralAmpModelerCore NAM/wavenet/a2_fast.cpp, 출발 코드는 sketches/06_nam_benchmark/src/bench_models.h (tools/benchmark_report.md)
+- 캐비닛 IR은 MVP, 최대 4096샘플(85ms), 600MHz에서 A2-Lite + IR 4096 = 56.6%. NAM 뒤 EQ 앞, 분할 128/FFT 256 overlap-save, CMSIS rfft는 256용 표만 직접 연결(init 함수 쓰면 RAM1 77KB 낭비), 출발 코드 sketches/06_nam_benchmark/src/bench_ir.h (software-design.md 6·7장)
+- (단계가 끝날 때마다 여기에 추가: 48kHz 주파수 검증, 핀 확정 등)
 ```
 
-### S0 실현 가능성 벤치마크
+### S0 실현 가능성 벤치마크 (CPU 측정 완료, 결과는 tools/benchmark_report.md)
 ```
 S0를 하자.
 1. software-design.md 3장에 정리한 48kHz 방법(build_flags -DAUDIO_SAMPLE_RATE_EXACT=48000.0f, Codec48k로 SYS_FS 덮어쓰기)을
@@ -315,18 +341,18 @@ S0를 하자.
 ### S1 변환기 + PC 추론 엔진
 ```
 S1을 하자.
-1. .namb 포맷 명세 문서를 먼저 확정(공통 컨텍스트의 구조 기준, 설정 블록 구조체를 A2-Lite/LSTM/A1 WaveNet별로 정의. A2 파일에서 Lite 부분만 추출).
+1. .namb 포맷 명세 문서를 먼저 확정(공통 컨텍스트의 구조 기준, A2-Lite 설정 블록 구조체 정의. A2 파일(SlimmableContainer)에서 channels 3 서브모델만 추출).
 2. tools/nam2namb.py: .nam JSON 파싱, 지원 아키텍처 검증(미지원은 이유와 함께 거부), .namb 저장, 왕복 검증.
 3. tools/make_reference.py: 공식 NAM 파이썬 패키지로 테스트 신호(사인 스윕, 임펄스, 기타 DI wav) 처리해 기준 출력 저장.
-4. src/nam/: A2-Lite, LSTM, A1 WaveNet 순전파(정적 메모리, 링버퍼 dilated conv, 근사 tanh 옵션). 가중치 순서 근거를 공식 코어 소스 기준으로 주석에.
+4. src/nam/: A2-Lite 순전파(정적 메모리, 링버퍼 dilated conv). sketches/06_nam_benchmark/src/bench_models.h의 A2Lite에서 출발. 가중치 순서 근거를 공식 코어 a2_fast.cpp _load_weights() 기준으로 주석에.
 5. test_pc/: CMake로 같은 소스를 빌드해 기준 출력과 최대 오차·RMS 오차 출력. 목표 최대 오차 1e-4.
 ```
 
 ### S2 보드에서 모델 재생
 ```
-S2: AudioEffectNAM(AudioStream 상속)을 만들어 보드에서 모델을 돌리자.
-- int16↔float 변환, 입력 게인, 메타데이터 loudness 기반 레벨 정규화, 출력 소프트 클리퍼.
-- 우선 SD에서 고정 파일 하나를 setup()에서 로드.
+S2: AudioEffectNAM(AudioStream 상속)을 만들어 보드에서 모델과 캐비닛 IR을 돌리자.
+- int16↔float 변환, 입력 게인, 메타데이터 loudness 기반 레벨 정규화, IR 컨볼루션(dsp/IrConv), 출력 소프트 클리퍼.
+- 우선 SD에서 고정 모델 파일 하나와 IR wav 하나를 setup()에서 로드.
 - CPU%, 오디오 메모리 사용량을 1초마다 시리얼 출력.
 - 실제 기타로 확인할 체크리스트(톤이 PC 플러그인과 비슷한지 비교하는 방법 포함).
 ```
@@ -336,6 +362,7 @@ S2: AudioEffectNAM(AudioStream 상속)을 만들어 보드에서 모델을 돌�
 S3: ModelLoader와 프리셋 시스템.
 - 상태 머신(IDLE→OPENING→READING 4KB 청크→VALIDATING→BUILDING→PREWARMING→READY→교체, 실패 시 ERROR)을 loop()에서 비차단으로.
 - 모델 슬롯 2개 정적 할당, 블록 경계 포인터 교체 + 5ms 페이드아웃/인. 같은 모델이면 로딩 생략.
+- IrLoader: wav 헤더 검증(48kHz, 모노/스테레오 L, PCM16/24/float32), 청크 읽기, 정규화, loop 1회당 분할 1개 FFT, 스펙트럼 슬롯 2개(RAM2). 모델과 IR이 같이 바뀌면 둘 다 준비된 뒤 페이드 한 번에 교체.
 - ArduinoJson으로 /presets 읽기/쓰기, /system/state.json 지연 저장(2초 디바운스).
 - 테스트: 100회 연속 전환, 손상 파일, SD 미삽입 부팅.
 ```
@@ -343,7 +370,7 @@ S3: ModelLoader와 프리셋 시스템.
 ### S4 UI
 ```
 S4: UI를 만들자.
-- 상태 머신(HOME, 프리셋 미리보기, 페이지 순환, MENU: Save/Select Model/Settings/USB Mode/Info)을 텍스트 다이어그램으로 먼저 보여주고 코드로.
+- 상태 머신(HOME, 프리셋 미리보기, 페이지 순환, MENU: Save/Select Model/Select IR/Settings/USB Mode/Info)을 텍스트 다이어그램으로 먼저 보여주고 코드로.
 - 포트: 이동평균+히스테리시스, 캐치 방식, 잠금 중 화면 표시. 인코더: Encoder 라이브러리, 짧게/길게 구분. 풋스위치: 디바운스, 600ms 도달 즉시 길게 판정.
 - U8g2 SSD1305 128x32 SPI(Waveshare 2.23"), 변경 시에만 최대 20fps 갱신, HOME에 I/O 레벨 미터, 노브 조작 시 1.5초 팝업.
 - UI는 Params 구조체만 바꾸고 오디오 코드는 직접 건드리지 않게.
@@ -352,5 +379,5 @@ S4: UI를 만들자.
 ### S5~S6 마감·확장
 ```
 S5: 에러 처리와 설정 메뉴를 마무리하자(SD 제거, 손상 파일, 프리셋 이름 편집, 코덱 레벨 설정).
-S6(선택): MTP_Teensy로 USB 모드(활성화 중 SD 접근 잠금, 종료 시 재스캔), 릴레이 바이패스 제어(전환 전 뮤트), 남은 CPU로 짧은 캐비닛 IR 컨볼루션 가능 여부 측정.
+S6(선택): MTP_Teensy로 USB 모드(활성화 중 SD 접근 잠금, 종료 시 재스캔), 릴레이 바이패스 제어(전환 전 뮤트).
 ```

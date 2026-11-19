@@ -13,7 +13,8 @@ Teensy 4.1과 [NAM(Neural Amp Modeler)](https://www.neuralampmodeler.com/)으로
 |---|---|
 | MCU | Teensy 4.1 (Cortex-M7 600MHz, RAM 1MB) |
 | 코덱 | PJRC Audio Shield Rev D (SGTL5000), 48kHz |
-| 모델 | 1순위 A2-Lite, 예비 A1 Nano / 소형 LSTM (A1 Standard, A2-Full 미지원) |
+| 모델 | **A2-Lite만 지원** (S0 측정: 600MHz에서 CPU 49.6%). A1 WaveNet, LSTM, A2-Full 미지원 |
+| 캐비닛 IR | MVP 포함. SD `/irs/*.wav` (48kHz 모노, 최대 4096샘플 = 85ms), 분할 FFT 컨볼루션. 프리셋마다 IR 선택 또는 없음. A2-Lite + IR = CPU 56.6% |
 | 조작계 | 작은 노브 3개(B10K), 큰 노브 1개(EC11 인코더), 풋스위치 1개, Waveshare 2.23" OLED 128x32 |
 | 입출력 | 1/4" IN, OUT, FX 루프 SEND/RETURN (아날로그, 앰프 모델 뒤) |
 | 전원 | 9V DC 센터 마이너스, 500mA 이상 권장 |
@@ -22,7 +23,7 @@ Teensy 4.1과 [NAM(Neural Amp Modeler)](https://www.neuralampmodeler.com/)으로
 신호 흐름:
 
 ```
-IN → 입력 버퍼(1MΩ) → ADC → 노이즈게이트 → Input Gain → NAM 모델 → EQ → Master
+IN → 입력 버퍼(1MΩ) → ADC → 노이즈게이트 → Input Gain → NAM 모델 → 캐비닛 IR → EQ → Master
    → DAC → 출력 버퍼 → SEND → RETURN(미삽입 시 자동 연결) → 출력 버퍼 → OUT
 ```
 

@@ -7,9 +7,9 @@ platformio.ini
 src/main.cpp            설정·루프 (지금은 패스스루 뼈대)
 src/pins.h              핀 배치 (회로와 코드가 공유하는 유일한 기준)
 src/audio/              AudioEffectNAM: AudioStream 상속, 블록 단위 추론
-src/nam/                경량 추론 엔진 (A2-Lite, LSTM, A1 WaveNet), .namb 포맷
-src/dsp/                노이즈게이트, 바이쿼드 EQ, 게인, 소프트 클리퍼
-src/storage/            ModelLoader, Presets, SystemState
+src/nam/                경량 추론 엔진 (A2-Lite만), .namb 포맷
+src/dsp/                노이즈게이트, 바이쿼드 EQ, 게인, 소프트 클리퍼, 캐비닛 IR 컨볼루션
+src/storage/            ModelLoader, IrLoader, Presets, SystemState
 src/ui/                 노브·인코더·풋스위치 입력, 페이지, 메뉴, 화면
 test_pc/                PC 빌드 정확성 테스트
 ```

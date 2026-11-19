@@ -16,5 +16,7 @@ pio run -d sketches/01_blink -t upload    # 저장소 루트에서
 | [05_sd_card](05_sd_card) | + microSD | 내장 SD 읽기/쓰기, `/models` 목록 |
 | [06_nam_benchmark](06_nam_benchmark) | 02와 같음 | 48kHz 설정, 모델별 CPU 사용률 (S0) |
 | [07_memory_test](07_memory_test) | Teensy 4.1 (+ 선택: PSRAM) | RAM1/RAM2/PSRAM 읽기·쓰기 검증, 영역별 속도 |
+| [08_ui_integration](08_ui_integration) | 03 + 04 배선 | 조작계 + 화면 통합: 페이지 전환, 캐치, 프리셋 미리보기, 바이패스, 루프 최대 시간 |
+| [09_breadboard_system](09_breadboard_system) | 08 + 오디오실드 + 입력 버퍼(9V) | NAM 없는 페달 전체: 노브로 Gain/EQ/Master, 실제 I/O 미터, 바이패스 페이드, OLED 잡음 A/B, lineInLevel 확정 |
 
 핀 번호는 각 스케치 상단의 `#define`에 있습니다. 핀을 바꾸면 [`firmware/src/pins.h`](../firmware/src/pins.h)와 [`docs/hardware-design.md`](../docs/hardware-design.md)도 같이 고치세요.
