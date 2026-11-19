@@ -241,6 +241,7 @@ Bass  Mid  Treb   I [####  ]
 - 배치와 좌표는 `sketches/04_oled_display`에 있음. 5x7 글꼴 4줄(모델 파일명 줄 추가) 배치도 같은 스케치에서 비교 가능.
 - 화면: Waveshare 2.23" OLED 128x32 SPI (SSD1305). 라이브러리 U8g2, 생성자 `U8G2_SSD1305_128X32_ADAFRUIT_F_4W_HW_SPI`(Waveshare는 Adafruit와 같은 설정). 프레임버퍼 방식으로 변경 시에만 전송, 최대 20fps. 미터가 움직이는 동안은 매 프레임 바뀜.
 - 노브를 돌리는 동안 1.5초간 해당 파라미터 큰 글씨 팝업.
+- **화면 밝기 기본값은 낮게** (09 시험: 밝기를 낮추면 OLED 패널 전원 잡음이 줄어듦, hardware-design.md 5장). 값은 Settings에서 조절하고 `/system/settings.json`에 저장. 기본값은 실제 케이스에서 보이는 정도로 정함.
 
 ---
 
