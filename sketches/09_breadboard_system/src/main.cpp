@@ -17,6 +17,7 @@
 // 6. [통계]의 CPU%, 오디오 메모리 최대, 루프 최대 us 기록 (NAM이 쓸 수 있는 여유의 기준선)
 //
 // 시리얼 명령: o 화면 켜기/끄기 | f 프레임 20/5/1fps | b 바이패스 | l/L lineInLevel 내림/올림 | s 통계 출력 켜기/끄기
+//             p 포트 읽기 켜기/끄기 | n 다음 프리셋 (인코더·풋스위치 없이 시험할 때)
 
 #include <Arduino.h>
 #include <Audio.h>
@@ -40,6 +41,10 @@
 #define PIN_OLED_RST  25
 
 // ================= 동작 상수 =================
+// 포트를 아직 안 달았으면 0. 아날로그 핀이 떠 있으면 값이 제멋대로 움직여 Gain/Master가 튐(갑자기 큰 소리).
+// 실행 중에는 시리얼 'p'로도 켜고 끌 수 있음
+#define USE_POTS         1
+
 #define DEBOUNCE_MS      20
 #define LONG_PRESS_MS    600
 #define POT_HYST         0.01f
@@ -315,7 +320,10 @@ void loadPreset(int idx) {
   Serial.printf("프리셋 로드: [%02d] %s (포트 잠금)\n", idx + 1, PRESETS[idx].name);
 }
 
+bool potsOn = USE_POTS;
+
 void pollPots(unsigned long now) {
+  if (!potsOn) return;
   if (now - potLastReadAt < POT_INTERVAL_MS) return;
   potLastReadAt = now;
   for (int i = 0; i < 3; i++) {
@@ -391,6 +399,12 @@ void handleSerial() {
         statsOn = !statsOn;
         Serial.printf("통계 출력 %s\n", statsOn ? "켜짐" : "꺼짐");
         break;
+      case 'p':
+        potsOn = !potsOn;
+        for (int i = 0; i < 3; i++) { potPos[i] = -1.0f; potLocked[i] = true; }  // 다시 켤 때 캐치부터
+        Serial.printf("포트 읽기 %s\n", potsOn ? "켜짐 (잠금 상태로 시작)" : "꺼짐 (프리셋 값 고정)");
+        break;
+      case 'n': previewing = false; loadPreset((presetIdx + 1) % PRESET_COUNT); break;
       default: break;
     }
   }
@@ -520,7 +534,8 @@ void setup() {
   Serial.printf("샘플레이트 %.1f Hz (SYS_FS 48k 설정 %s), 블록 %d 샘플\n",
                 AUDIO_SAMPLE_RATE_EXACT, fsOk ? "성공" : "실패", AUDIO_BLOCK_SAMPLES);
   setLineIn(0);
-  Serial.println("명령: o 화면 | f fps | b 바이패스 | l/L lineInLevel | s 통계");
+  Serial.println("명령: o 화면 | f fps | b 바이패스 | l/L lineInLevel | s 통계 | p 포트 | n 다음 프리셋");
+  if (!potsOn) Serial.println("포트 읽기 꺼짐 (USE_POTS 0). 노브 값은 프리셋 값으로 고정");
   loadPreset(0);
   lastReportAt = millis();
 }
