@@ -13,24 +13,25 @@
 
 Teensy 4.1 사양: Cortex-M7 600MHz(단정밀 FPU), RAM 1MB(그 중 512KB가 빠른 TCM), 플래시 8MB, 내장 microSD(SDIO), PSRAM 패드(선택).
 
-NAM 모델은 아키텍처별로 연산량이 크게 다릅니다. 아래 수치는 레이어 구성으로 계산한 **추정치**이고, Phase 0 벤치마크로 확정해야 합니다.
+NAM 모델은 아키텍처별로 연산량이 크게 다릅니다. **Phase 0(S0) 벤치마크로 확정했습니다** (2026-11-19, 더미 가중치, 블록 128, 48kHz. 상세는 [benchmark_report.md](../tools/benchmark_report.md)).
 
-| 모델 종류 | 샘플당 연산(대략) | 48kHz 환산 | Teensy 4.1 판단 |
-|---|---|---|---|
-| WaveNet **Standard** | 수만 MAC + tanh 수백 회 | 1 GMAC/s 이상 | **불가**. 600MHz M7의 현실적 처리량(수백 MMAC/s)을 넘음 |
-| WaveNet **Lite** | Standard의 약 절반 | | 거의 불가 |
-| WaveNet **Feather** | Standard의 수분의 1 | | 경계선. 오버클럭(816MHz)+최적화 필요할 수 있음 |
-| WaveNet **Nano** | Standard의 1/10 안팎 | | **가능성 높음**. 1차 목표 |
-| **LSTM** (hidden 8~24) | 1~3천 MAC | 수십~150 MMAC/s | **여유 있게 가능**. 안전한 대안 |
-| **A2-Lite** (2026 신규) | 공개 수치 없음 | | **1순위 목표.** TONE3000 발표: 600MHz Cortex-M7(Teensy 4.1과 같은 급)에서 CPU 약 50%. Daisy Seed(480MHz)에서 약 53% 사용자 보고 |
+| 모델 종류 | MAC/샘플 | 600MHz CPU max | 816MHz CPU max | 판단 |
+|---|---|---|---|---|
+| **A2-Lite** (2026 신규) | 1,731 (tanh 없음) | **49.6%** | 36.5% | **지원 (유일).** TONE3000 발표치(같은 급 M7에서 약 50%)와 일치 |
+| A1 WaveNet Nano | 732 | 84.1% (근사 tanh) | 61.8% (근사 tanh) | 미지원. 600MHz에서 기준(70%) 초과 |
+| LSTM 1층 h16 / 2층 h8 | 1,104 / 808 | 92% / 77% (근사 tanh) | 68% / 57% (근사 tanh) | 미지원. 같은 이유 |
+| A1 WaveNet Feather, LSTM h24 | 2,808 / 2,424 | 과부하 | 과부하 | 불가 |
+| A1 Lite/Standard, A2-Full | 수천~1만 이상 | | | 불가 (계산만으로 판단) |
+
+- `std::tanhf`를 쓰면 A1과 LSTM은 모두 과부하였습니다. A1·LSTM은 tanh/sigmoid가 시간 대부분을 차지하고, A2-Lite는 LeakyReLU라 이 비용이 없습니다.
 
 결론:
-- **1차 지원 대상: A2-Lite** (음질은 A1 Standard급, 임베디드용으로 설계됨). A1 Nano와 소형 LSTM은 예비. Feather는 벤치마크 결과를 보고 결정.
+- **지원 대상: A2-Lite만** (음질은 A1 Standard급, 임베디드용으로 설계됨). 600MHz 기본 클럭으로 기준 70%에 약 20%p 여유. A1·LSTM은 816MHz + 근사 tanh에서만 통과해 지원하지 않습니다(현재 트레이너도 A2만 만듦).
 - A2 모델 파일 하나에 Full(8채널)과 Lite(3채널)가 같이 들어 있고, TONE3000에서 새로 학습하면 A2만 나옵니다. 그래서 새 모델은 재학습 없이 Lite 부분만 꺼내 쓰면 됩니다.
-- A1 Standard와 A2-Full은 지원하지 않습니다. 예전 A1 Standard 모델을 쓰고 싶으면 A2로 재학습하세요.
-- 메모리는 문제 없음: Nano/Feather 가중치는 수천~수만 개 float(수십 KB 수준). 모델 2개(현재 + 로딩 중)를 RAM에 동시에 들고 있어도 충분합니다.
+- 예전 A1·LSTM 모델을 쓰고 싶으면 A2로 재학습하세요.
+- 메모리는 문제 없음: A2-Lite 가중치는 약 1,900개 float(7.6KB), 상태 링버퍼는 약 147KB. 가중치 2벌(현재 + 로딩 중)을 들고 있어도 충분합니다.
 - **샘플레이트**: NAM 모델은 48kHz로 학습됩니다. Teensy Audio Library 기본값은 44.1kHz이므로 **48kHz로 바꿔서 돌려야** 톤이 정확합니다(`AUDIO_SAMPLE_RATE_EXACT`를 빌드 옵션으로 재정의하면 Teensy 4.x는 I2S 클럭이 자동 계산됨 + SGTL5000 클럭 레지스터 설정, 자세한 방법은 software-design.md 3장). 이것도 Phase 0에서 같이 검증합니다.
-- **추론 엔진**: 공식 NeuralAmpModelerCore는 Eigen, nlohmann/json, std::filesystem을 써서 Teensy에 그대로 올리기 무겁습니다. **WaveNet/LSTM 순전파만 직접 짠 경량 C++ 엔진**(CMSIS-DSP 활용)을 만들고, PC에서 공식 코어로 뽑은 기준 출력과 비교해 정확성을 검증하는 방식을 권장합니다.
+- **추론 엔진**: 공식 NeuralAmpModelerCore는 Eigen, nlohmann/json, std::filesystem을 써서 Teensy에 그대로 올리기 무겁습니다. **A2-Lite 순전파만 직접 짠 경량 C++ 엔진**을 만들고, PC에서 공식 코어로 뽑은 기준 출력과 비교해 정확성을 검증하는 방식을 권장합니다.
 - 참고: 같은 프로젝트의 Daisy Seed(480MHz M7)도 연산 체급은 비슷해서, Teensy에서 안 되는 모델은 Daisy에서도 대체로 안 됩니다. 반대로 Teensy에서 검증된 엔진 코드는 Daisy로 거의 그대로 옮길 수 있습니다.
 
 ### 모델 파일 형식(.nam / .namb)
@@ -64,12 +65,11 @@ NAM 모델은 아키텍처별로 연산량이 크게 다릅니다. 아래 수치
 
 ### 화면 구성 예시 (software-design.md 8-3절과 같음)
 ```
-[03] Plexi Crunch       BYP
-plexi_nano.namb
-AMP  Gain  Bass  Treb
-     6.2   5.0   7.1
-CPU 61%                48k
+[03] Plexi Crunch     BYP
+Bass  Mid  Treb   I [####  ]
+ 5.0  4.5   7.1   O [###   ]
 ```
+모델 파일명, CPU%, 샘플레이트는 HOME에 없고 MENU(Select Model, Info)에서 봅니다.
 
 ---
 
@@ -83,7 +83,7 @@ IN 잭 → 입력 버퍼(1MΩ, 9V 바이어스) → 코덱 ADC
 ```
 - FX 루프는 **아날로그, 앰프 모델 뒤(앰프의 이펙트 루프와 같은 위치)**에 둡니다. 딜레이·리버브를 앰프 뒤에 거는 일반적인 용도에 맞고, CPU를 안 쓰고, 코덱 채널도 추가로 필요 없습니다.
 - 바이패스는 우선 **디지털 바이패스**(입력을 그대로 출력)로 구현합니다. 시간이 남으면 릴레이 트루 바이패스(전원 꺼져도 소리 통과)를 추가합니다.
-- 캐비닛 IR: NAM 모델이 앰프만 캡처한 경우 캐비닛 시뮬이 필요합니다. **MVP에서는 "앰프+캐비닛 통째로 캡처한 모델" 사용을 전제**로 하고, IR 컨볼루션은 CPU 여유가 남을 때의 확장 기능으로 둡니다.
+- 캐비닛 IR: NAM 모델이 앰프만 캡처한 경우 캐비닛 시뮬이 필요합니다. **MVP에서는 "앰프+캐비닛 통째로 캡처한 모델" 사용을 전제**로 하고, IR 컨볼루션은 확장 기능으로 둡니다. S0 결과 A2-Lite가 49.6%라 CPU 여유는 있습니다(IR 비용은 측정 예정, software-design.md 6장).
 
 ---
 
@@ -127,7 +127,7 @@ IN 잭 → 입력 버퍼(1MΩ, 9V 바이어스) → 코덱 ADC
 firmware/
   src/main.cpp            설정·루프
   audio/AudioEffectNAM    Teensy AudioStream 상속, 블록 단위 추론
-  nam/WaveNet, LSTM       경량 추론 엔진 (float32, CMSIS-DSP)
+  nam/A2Lite              경량 추론 엔진 (float32)
   nam/ModelLoader         .namb 파싱, 더블 버퍼, 안전한 교체
   dsp/Gate, EQ, Gain      전후처리
   ui/Knobs, Encoder, Footswitch, Display, Pages
@@ -149,14 +149,14 @@ tools/
 
 | 주차 | 단계 | 완료 기준 |
 |---|---|---|
-| 1 | **Phase 0 ★ 실현 가능성 검증** | Teensy+오디오실드 48kHz 패스스루 동작. A2-Lite(1순위)·A1 Nano·LSTM 더미 가중치로 CPU 사용률 측정. 지원 범위 결정 |
+| 1 | **Phase 0 ★ 실현 가능성 검증** | Teensy+오디오실드 48kHz 패스스루 동작. A2-Lite·A1·LSTM 더미 가중치로 CPU 사용률 측정. 지원 범위 결정 (**CPU 측정 완료: A2-Lite만 지원**, 48kHz 주파수 검증 남음) |
 | 2 | Phase 1 ★ 아날로그 프론트엔드 | 브레드보드에서 입력/출력 버퍼 + 코덱으로 기타 소리 깨끗하게 통과 |
 | 2~3 | Phase 2 ★ 추론 엔진 | `nam2namb.py` 완성. PC 기준 출력과 오차 1e-4 이하. 실제 기타로 모델 소리 확인 |
 | 4 | Phase 3 ★ 저장·전환 | SD에서 모델 로드, 프리셋 저장/불러오기, 끊김 없는 전환 |
 | 5 | Phase 4 ★ UI | 노브 3 + 인코더 + 화면 + 풋스위치, 페이지·캐치 동작 |
 | 6 | Phase 5 ★ 하드웨어 마감 | 전원부, FX 루프, 만능기판(또는 PCB) 조립, 케이스 가공 |
 | 7 | Phase 6 다듬기 | 노이즈 잡기, 노브 커브 조정, 노이즈게이트 튜닝, 실사용 테스트 |
-| 8 | 여유/확장 | USB MTP, 릴레이 트루바이패스, 캐비닛 IR, Feather 최적화 |
+| 8 | 여유/확장 | USB MTP, 릴레이 트루바이패스, 캐비닛 IR |
 
 시간이 모자라면 자르는 순서: 캐비닛 IR → 릴레이 바이패스 → USB MTP → EQ 페이지(빼면 Bass/Mid/Treble은 0.5(플랫) 고정, IN/OUT 페이지만 남음).
 PCB 주문(JLCPCB 등)은 배송 1~2주가 걸리므로, 시간이 촉박하면 **만능기판 + 기성 모듈**로 마감하는 쪽을 권장합니다.
@@ -171,7 +171,7 @@ PCB 주문(JLCPCB 등)은 배송 1~2주가 걸리므로, 시간이 촉박하면 
 | A2-Lite 구조 공개 정보 부족 | NAM 공식 코어의 A2 구현 소스를 기준으로 재구현. Daisy용 커뮤니티 구현(아래 출처) 참고 |
 | 48kHz 설정이 꼬임 | 최악의 경우 44.1kHz로 돌리고 약간의 톤 차이 감수(또는 학습을 44.1kHz로) |
 | SGTL5000 잡음/헤드룸 부족 | 입력 게인 단계 조정, 필요 시 코덱 보드 교체 |
-| 모델 교체 시 팝 노이즈 | 더블 버퍼 + 5ms 페이드아웃 → 교체 → 5ms 페이드인. 크로스페이드는 S0 결과 CPU 여유가 있을 때만 |
+| 모델 교체 시 팝 노이즈 | 더블 버퍼 + 5ms 페이드아웃 → 교체 → 5ms 페이드인. 크로스페이드는 S0 결과(49.6% > 35%)로 쓰지 않음 |
 | 디지털 잡음(화면·SD 접근 시 '찌직') | 스타 접지, 레귤레이터 분리, 화면 갱신 주기 제한(예: 20fps) |
 
 
