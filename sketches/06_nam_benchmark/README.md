@@ -3,6 +3,7 @@
 프로젝트의 가장 큰 리스크인 "Teensy 4.1에서 NAM이 실시간으로 도는가"를 검증합니다.
 1. 48kHz 설정이 맞는지 (1kHz 사인 주파수 측정)
 2. NAM 아키텍처별로 오디오 인터럽트 안에서 CPU를 얼마나 쓰는지 (더미 가중치)
+3. 모델 뒤에 캐비닛 IR 컨볼루션을 붙였을 때 추가 CPU (테스트용 가짜 IR)
 
 결과는 [`tools/benchmark_report.md`](../../tools/benchmark_report.md)에 기록합니다. 연산량 계산과 근거 소스도 거기 있습니다.
 
@@ -17,6 +18,7 @@ pio run -d sketches/06_nam_benchmark -t upload && pio device monitor -b 115200
 platformio.ini       build_flags에 -DAUDIO_SAMPLE_RATE_EXACT=48000.0f (코어·Audio 라이브러리까지 적용)
 src/main.cpp         오디오 그래프, 측정, 시리얼 명령, 자동 측정
 src/bench_models.h   A2-Lite, LSTM, A1 WaveNet 순전파 (Arduino 헤더 없음, PC에서도 빌드됨)
+src/bench_ir.h       캐비닛 IR 분할 FFT 컨볼루션 (보드: CMSIS rfft, PC: 기준 DFT)
 ```
 
 `bench_models.h`는 공식 NeuralAmpModelerCore와 **연산 구조와 메모리 접근 형태**를 같게 짠 것이고, 가중치는 난수입니다. 가중치 로딩 순서가 공식과 같은지는 S1(PC 기준 출력 비교)에서 확인합니다. S1에서 이 파일을 `firmware/src/nam/`으로 옮겨 다듬습니다.
@@ -36,23 +38,25 @@ src/bench_models.h   A2-Lite, LSTM, A1 WaveNet 순전파 (Arduino 헤더 없음,
 | `0`~`6` | 모델 선택: 0 없음(기준선), 1 A2-Lite, 2 LSTM h16, 3 LSTM h24, 4 LSTM 2×8, 5 A1 Nano, 6 A1 Feather |
 | `t` | tanh: `std::tanhf` ↔ 공식 `fast_tanh` 근사 |
 | `c` | CPU 클럭 600 ↔ 816MHz (`set_arm_clock`, 다시 업로드할 필요 없음) |
+| `v` | IR 길이 순환: 끔 → 1024 → 2048 → 4096샘플. 모델 뒤에 붙음(모델 0이면 IR만) |
+| `x` | IR 정확성 검사: 2048샘플 IR로 처리한 결과를 직접 컨볼루션과 비교 (부팅 때도 자동 실행) |
 | `i` | 모델 입력: 110Hz 사인 ↔ LINE IN L |
 | `w` | LINE OUT L: 1kHz 사인 ↔ 패스스루 |
 | `k` | SGTL5000 SYS_FS 48k ↔ 44.1k (실험: 설정을 빼먹으면 무엇이 틀어지는지) |
 | `r` | 최대값 리셋 |
-| `a` | 자동 측정. 600/816MHz × 모델 6개 × tanh 2가지(A2-Lite는 1가지) = 22조합, 약 80초. 끝나면 보고서에 붙일 표를 출력. 다시 `a`를 누르면 중단 |
+| `a` | 자동 측정. 600/816MHz × 모델 6개 × tanh 2가지(A2-Lite는 1가지) = 22조합 + 600MHz A2-Lite에 IR 1024/2048/4096 = 25조합, 약 90초. 끝나면 보고서에 붙일 표를 출력. 다시 `a`를 누르면 중단 |
 | `h` | 도움말과 현재 상태 |
 
 1초마다 상태 줄이 나옵니다.
 ```
-[A2-Lite | - | 600MHz] 모델 max 31.2% 평균 30.8% (max 499200 사이클) | 전체 CPU max 32.0% | 메모리 max 4 | 출력 RMS 0.0062 | 45.1C
+[A2-Lite | IR 2048 | - | 600MHz] 모델+IR max 52.0% 평균 51.2% (IR만 max 2.5%) | 전체 CPU max 52.6% | 메모리 max 4 | 출력 RMS 0.0062 | 45.1C
 ```
-- 모델 max/평균: 모델 `process()`만 잰 값 (ARM 사이클 카운터)
+- 모델+IR max/평균: 모델 `process()`와 IR을 합쳐 잰 값 (ARM 사이클 카운터). IR만 max는 IR 부분만
 - 전체 CPU max: `AudioProcessorUsageMax()`. **판정 기준은 이 값**
 - 출력 RMS: 0이 아니고 `NaN!`이 안 뜨면 계산이 실제로 돌고 있다는 뜻 (위 숫자는 예시)
 
 ## 측정 순서
-1. 업로드 후 시작 메시지에서 `AUDIO_SAMPLE_RATE_EXACT = 48000.0`, `SYS_FS 48k 설정 성공`, `CPU 600 MHz` 확인
+1. 업로드 후 시작 메시지에서 `AUDIO_SAMPLE_RATE_EXACT = 48000.0`, `SYS_FS 48k 설정 성공`, `CPU 600 MHz`, `IR 정확성 검사 ... 통과` 확인 (실드가 없으면 SYS_FS만 실패로 나오는 게 정상)
 2. LINE OUT L을 주파수 측정기(오실로스코프, 또는 PC 녹음 후 스펙트럼)에 연결해 1kHz 확인. 이어서 `k`로 SYS_FS를 44.1k로 바꿔 차이를 듣고/재고 다시 `k`
 3. `0` 상태에서 기준선 전체 CPU 기록
 4. `a`로 자동 측정. 끝나면 출력된 표를 보고서 2절에 붙임
@@ -69,3 +73,4 @@ src/bench_models.h   A2-Lite, LSTM, A1 WaveNet 순전파 (Arduino 헤더 없음,
 - 48kHz에서 1kHz 사인이 1000Hz로 측정되고 02와 같은 패스스루가 정상 동작
 - 자동 측정 표가 보고서에 기록되고, "전체 CPU max 70% 이하" 기준으로 지원 아키텍처가 정해짐
 - 측정 중 `NaN!`이나 재부팅 없음
+- IR 정확성 검사 통과 (최대 오차 1e-4 미만). CMSIS FFT의 출력 형식·스케일이 PC 기준 구현과 같다는 확인

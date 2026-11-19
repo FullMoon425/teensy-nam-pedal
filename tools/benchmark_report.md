@@ -94,7 +94,23 @@
 
 - 816MHz 측정 중 최고 온도: ___°C (방열판 유무: ___)
 
-## 3. 48kHz 설정 검증
+## 3. 캐비닛 IR 컨볼루션 (MVP 결정 후 추가)
+
+- 방식: 균일 분할 overlap-save. 분할 = 블록 128, FFT 256 (CMSIS `arm_rfft_fast_f32`). 블록마다 FFT 2번 + 복소 곱셈 (IR길이/128)×129번. 추가 지연 없음.
+- 저장소: RAM2(DMAMEM). IR 4096 기준 스펙트럼 32KB + 주파수 지연선 32KB.
+- 코드: `sketches/06_nam_benchmark/src/bench_ir.h`. PC에서 직접 컨볼루션과 비교해 최대 오차 4.1e-7 (IR 4096).
+- **CMSIS 함정**: `arm_rfft_fast_init_f32()`를 쓰면 모든 크기의 트위들 표가 RAM1(DTCM)에 올라가 RAM1 사용이 약 77KB 늘어남(빌드 결과 비교). 256용 표만 직접 연결해 해결.
+- 보드 정확성 검사(`x`, 부팅 시 자동): 최대 오차 ___ (통과/실패)
+
+| 날짜 | 구성 | IR 길이 | 클럭 | 모델+IR max % | IR만 max % | 전체 CPU max % | 판정 |
+|---|---|---|---|---|---|---|---|
+| | A2-Lite + IR | 1024 (21ms) | 600MHz | | | | |
+| | A2-Lite + IR | 2048 (43ms) | 600MHz | | | | |
+| | A2-Lite + IR | 4096 (85ms) | 600MHz | | | | |
+
+- IR 최대 길이 결정: ___ (전체 CPU max 70% 이하 + EQ·게이트 등 몇 % 여유를 남기는 가장 긴 길이)
+
+## 4. 48kHz 설정 검증
 - 방법: `sketches/06_nam_benchmark` (PlatformIO, `-DAUDIO_SAMPLE_RATE_EXACT=48000.0f` + `Codec48k::setSysFs48k()`)
 - 시리얼 출력 `AUDIO_SAMPLE_RATE_EXACT`:
 - 측정 주파수 (LINE OUT L 1kHz 사인, 1000Hz 정상 / 약 1088Hz·919Hz면 불일치):
