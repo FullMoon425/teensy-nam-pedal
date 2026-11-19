@@ -1,40 +1,71 @@
 # 06_nam_benchmark (S0)
 
-프로젝트의 가장 큰 리스크인 "Teensy 4.1에서 NAM이 실시간으로 도는가"를 검증하는 스케치입니다.
-소프트웨어 담당이 [software-design.md](../../docs/software-design.md) 11장의 **S0 프롬프트**로 만들어 이 폴더에 넣습니다.
+프로젝트의 가장 큰 리스크인 "Teensy 4.1에서 NAM이 실시간으로 도는가"를 검증합니다.
+1. 48kHz 설정이 맞는지 (1kHz 사인 주파수 측정)
+2. NAM 아키텍처별로 오디오 인터럽트 안에서 CPU를 얼마나 쓰는지 (더미 가중치)
 
-## 빌드 방법: 독립 PlatformIO 프로젝트
+결과는 [`tools/benchmark_report.md`](../../tools/benchmark_report.md)에 기록합니다. 연산량 계산과 근거 소스도 거기 있습니다.
 
-01~05와 같은 독립 PlatformIO 프로젝트이고, 다른 점은 `build_flags`의 48kHz 설정입니다. 48kHz는 `-DAUDIO_SAMPLE_RATE_EXACT=48000.0f`를 코어와 Audio 라이브러리까지 같이 적용해야 하는데, 소스 안의 `#define`으로는 라이브러리에 적용되지 않기 때문입니다.
-
-```
-sketches/06_nam_benchmark/
-  platformio.ini     build_flags에 -DAUDIO_SAMPLE_RATE_EXACT=48000.0f
-  src/main.cpp       48kHz 검증 뼈대 (1kHz 사인 / 패스스루). 벤치마크 객체는 여기에 추가
-```
-
-메인 펌웨어(`firmware/`)에 env를 추가하지 않고 따로 둔 이유: 벤치마크용 더미 모델과 측정 코드가 메인 펌웨어와 섞이지 않고, 메인 펌웨어는 S0 검증 전까지 44.1kHz로 안전하게 남습니다. 벤치마크에서 검증한 추론 코드는 S1에서 `firmware/src/nam/`으로 옮깁니다.
-
-명령은 저장소 루트에서 실행합니다 (VS Code에서는 이 폴더를 열고 상태바 아이콘을 써도 됩니다).
+부품은 02와 같습니다 (Teensy 4.1 + 오디오실드). 벤치마크만 할 때는 입력·출력을 연결하지 않아도 됩니다.
 
 ```bash
-pio run -d sketches/06_nam_benchmark                 # 빌드
-pio run -d sketches/06_nam_benchmark -t upload       # 업로드
-pio device monitor -b 115200                         # 시리얼 모니터
+pio run -d sketches/06_nam_benchmark -t upload && pio device monitor -b 115200
 ```
 
-`src/main.cpp`의 `TEST_SINE`이 1이면 LINE OUT L로 1kHz 사인이 나오고, 0이면 LINE IN L 패스스루입니다.
+## 파일
+```
+platformio.ini       build_flags에 -DAUDIO_SAMPLE_RATE_EXACT=48000.0f (코어·Audio 라이브러리까지 적용)
+src/main.cpp         오디오 그래프, 측정, 시리얼 명령, 자동 측정
+src/bench_models.h   A2-Lite, LSTM, A1 WaveNet 순전파 (Arduino 헤더 없음, PC에서도 빌드됨)
+```
 
-## 할 일
-1. Teensy Audio Library를 48kHz로 동작. 방법은 [software-design.md 3장](../../docs/software-design.md#3-오디오-설정-확정--확인-필요)에 정리되어 있습니다.
-   - `platformio.ini`의 `build_flags`에 `-DAUDIO_SAMPLE_RATE_EXACT=48000.0f` (I2S/PLL4는 Audio 라이브러리 `output_i2s.cpp`가 이 값으로 자동 계산)
-   - `codec.enable()` 뒤에 `Codec48k::setSysFs48k()`로 SGTL5000 `CHIP_CLK_CTRL`을 `0x0008`(SYS_FS 48kHz)로 덮어쓰기 (`src/main.cpp`에 있음)
-   - 1kHz 사인파를 내보내 주파수를 측정해 검증 (1000Hz 정상, 약 1088Hz 또는 919Hz면 설정 불일치). 결과는 `benchmark_report.md`의 "48kHz 설정 검증"에 기록
-2. 더미 가중치로 아키텍처별 순전파를 돌리는 AudioStream 객체
-   - A2-Lite (1순위), LSTM hidden 16 / 24, A1 WaveNet Nano, Feather
-3. 600MHz / 816MHz, `std::tanh` / 근사 tanh 조합별 `AudioProcessorUsageMax()`를 시리얼로 출력
-4. 결과를 [`tools/benchmark_report.md`](../../tools/benchmark_report.md)에 기록하고 "CPU 70% 이하" 기준으로 지원 아키텍처 확정
+`bench_models.h`는 공식 NeuralAmpModelerCore와 **연산 구조와 메모리 접근 형태**를 같게 짠 것이고, 가중치는 난수입니다. 가중치 로딩 순서가 공식과 같은지는 S1(PC 기준 출력 비교)에서 확인합니다. S1에서 이 파일을 `firmware/src/nam/`으로 옮겨 다듬습니다.
+
+## 오디오 연결
+| 경로 | 용도 |
+|---|---|
+| 110Hz 사인 → 벤치마크 모델 | 측정값이 기타 연주와 무관하게 재현되도록. `i`로 LINE IN L로 바꿀 수 있음 |
+| 1kHz 사인 → LINE OUT L | 48kHz 검증용 주파수 측정. `w`로 LINE IN 패스스루로 바꿀 수 있음 |
+| LINE IN L → LINE OUT R | 항상 패스스루 |
+
+모델 출력은 스피커로 보내지 않습니다 (난수 가중치라 의미 없는 소리).
+
+## 시리얼 명령
+| 키 | 동작 |
+|---|---|
+| `0`~`6` | 모델 선택: 0 없음(기준선), 1 A2-Lite, 2 LSTM h16, 3 LSTM h24, 4 LSTM 2×8, 5 A1 Nano, 6 A1 Feather |
+| `t` | tanh: `std::tanhf` ↔ 공식 `fast_tanh` 근사 |
+| `c` | CPU 클럭 600 ↔ 816MHz (`set_arm_clock`, 다시 업로드할 필요 없음) |
+| `i` | 모델 입력: 110Hz 사인 ↔ LINE IN L |
+| `w` | LINE OUT L: 1kHz 사인 ↔ 패스스루 |
+| `k` | SGTL5000 SYS_FS 48k ↔ 44.1k (실험: 설정을 빼먹으면 무엇이 틀어지는지) |
+| `r` | 최대값 리셋 |
+| `a` | 자동 측정. 600/816MHz × 모델 6개 × tanh 2가지(A2-Lite는 1가지) = 22조합, 약 80초. 끝나면 보고서에 붙일 표를 출력. 다시 `a`를 누르면 중단 |
+| `h` | 도움말과 현재 상태 |
+
+1초마다 상태 줄이 나옵니다.
+```
+[A2-Lite | - | 600MHz] 모델 max 31.2% 평균 30.8% (max 499200 사이클) | 전체 CPU max 32.0% | 메모리 max 4 | 출력 RMS 0.0062 | 45.1C
+```
+- 모델 max/평균: 모델 `process()`만 잰 값 (ARM 사이클 카운터)
+- 전체 CPU max: `AudioProcessorUsageMax()`. **판정 기준은 이 값**
+- 출력 RMS: 0이 아니고 `NaN!`이 안 뜨면 계산이 실제로 돌고 있다는 뜻 (위 숫자는 예시)
+
+## 측정 순서
+1. 업로드 후 시작 메시지에서 `AUDIO_SAMPLE_RATE_EXACT = 48000.0`, `SYS_FS 48k 설정 성공`, `CPU 600 MHz` 확인
+2. LINE OUT L을 주파수 측정기(오실로스코프, 또는 PC 녹음 후 스펙트럼)에 연결해 1kHz 확인. 이어서 `k`로 SYS_FS를 44.1k로 바꿔 차이를 듣고/재고 다시 `k`
+3. `0` 상태에서 기준선 전체 CPU 기록
+4. `a`로 자동 측정. 끝나면 출력된 표를 보고서 2절에 붙임
+5. 원하는 조합은 수동으로 다시 확인 (예: `1` → `c`로 816MHz)
+6. 보고서의 "결론"을 채우고, docs의 **(벤치마크 후 결정)** 항목을 **(확정)**으로 바꿈
+
+## 주의
+- **과부하 보호:** 모델이 블록 예산의 90%를 3블록 연속으로 넘으면 오디오 쪽에서 모델을 스스로 뗍니다. 이때 `!! 과부하` 메시지가 나옵니다. 보호가 없으면 오디오 인터럽트가 CPU를 다 써서 `loop()`가 못 돌고, 시리얼이 멈춘 것처럼 보입니다. 특히 `std::tanhf`/`expf`를 쓰는 LSTM과 A1이 이렇게 될 수 있습니다. 자동 측정에서는 해당 칸이 "불가 (과부하)"로 기록됩니다.
+- **816MHz는 발열이 큽니다.** 방열판 없이 오래 두지 말고 상태 줄의 온도를 보세요. 85°C에 가까우면 600MHz(`c`)로 돌립니다.
+- 측정값은 `-O2` 기준입니다. 최적화 옵션(`-O3`, `-ffast-math`)과 CMSIS-DSP 적용은 S1 이후 따로 비교합니다.
+- 클럭을 바꿔도 오디오 클럭(PLL4)은 그대로라 소리는 끊기지 않습니다.
 
 ## 통과 기준
-- 48kHz에서 02와 같은 패스스루가 정상 동작
-- 지원 아키텍처 목록이 확정되어 docs의 **(벤치마크 후 결정)** 항목이 **(확정)**으로 바뀜
+- 48kHz에서 1kHz 사인이 1000Hz로 측정되고 02와 같은 패스스루가 정상 동작
+- 자동 측정 표가 보고서에 기록되고, "전체 CPU max 70% 이하" 기준으로 지원 아키텍처가 정해짐
+- 측정 중 `NaN!`이나 재부팅 없음
